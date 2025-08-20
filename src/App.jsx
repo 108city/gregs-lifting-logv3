@@ -378,6 +378,27 @@ function AddExercisePicker({ exercises, onPick }) {
 }
 
 // ================== Log ==================
+// ---- Performance marker helpers (up / hold / down) ----
+function ratingBg(r) {
+  return r === "up"
+    ? "bg-green-600 text-white"
+    : r === "hold"
+    ? "bg-amber-500 text-black"
+    : r === "down"
+    ? "bg-red-600 text-white"
+    : "bg-zinc-800 text-zinc-200";
+}
+
+function ratingDot(r) {
+  return r === "up"
+    ? "bg-green-600"
+    : r === "hold"
+    ? "bg-amber-500"
+    : r === "down"
+    ? "bg-red-600"
+    : "bg-zinc-700";
+}
+
 function LogTab({ db, setDb }) {
   const activeWorkout = getActiveWorkout(db);
   const days = activeWorkout?.days || [];
