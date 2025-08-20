@@ -5,13 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Greg's Lifting Log</title>
 
-    <!-- PWA manifest + icon setup -->
+    <!-- PWA manifest + icons (must live under /public) -->
     <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="theme-color" content="#1E3A8A" />
   </head>
   <body class="bg-black text-blue-500">
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <!-- Use a relative path so Vite resolves it in all environments -->
+    <script type="module" src="./src/main.jsx"></script>
   </body>
 </html>
