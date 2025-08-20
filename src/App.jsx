@@ -1,4 +1,3 @@
-
 import React, { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -192,6 +191,41 @@ function ExercisesTab({ db, setDb }) {
   );
 }
 
+// ================== Helper: commit-on-blur number input ==================
+function NumberInputCommit({ value, min = 1, max = 999, onCommit, className = "" }) {
+  const [text, setText] = React.useState(String(value));
+  React.useEffect(() => { setText(String(value)); }, [value]);
+
+  const commit = () => {
+    const raw = text.trim() === "" ? String(value) : text;
+    const num = /^\d+$/.test(raw) ? parseInt(raw, 10) : value;
+    const clamped = Math.max(min, Math.min(max, num));
+    onCommit(clamped);
+    setText(String(clamped));
+  };
+
+  return (
+    <Input
+      type="text"
+      inputMode="numeric"
+      className={className}
+      value={text}
+      onChange={(e) => {
+        const t = e.target.value;
+        if (t === "" || /^\d+$/.test(t)) setText(t);
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur(); // triggers commit
+        }
+      }}
+      placeholder="0"
+    />
+  );
+}
+
 // ================== Program (Workouts + 3-day designer) ==================
 function ProgramTab({ db, setDb }) {
   const workouts = db.program.workouts;
@@ -292,14 +326,29 @@ function ProgramTab({ db, setDb }) {
               return (
                 <div key={b.id} className="p-3 rounded border grid grid-cols-1 md:grid-cols-5 gap-3 items-center">
                   <div className="md:col-span-2 font-medium">{idx+1}. {ex?.name || "(deleted)"}</div>
+
                   <div className="flex items-center gap-2">
                     <Label className="text-sm">Sets</Label>
-                    <Input type="number" min={1} value={b.sets} onChange={e=>updateBlock(b.id, { sets: clampInt(e.target.value, 1, 20) })} className="w-24" />
+                    <NumberInputCommit
+                      value={b.sets}
+                      min={1}
+                      max={20}
+                      className="w-24"
+                      onCommit={(n) => updateBlock(b.id, { sets: n })}
+                    />
                   </div>
+
                   <div className="flex items-center gap-2">
                     <Label className="text-sm">Reps</Label>
-                    <Input type="number" min={1} value={b.reps} onChange={e=>updateBlock(b.id, { reps: clampInt(e.target.value, 1, 50) })} className="w-24" />
+                    <NumberInputCommit
+                      value={b.reps}
+                      min={1}
+                      max={50}
+                      className="w-24"
+                      onCommit={(n) => updateBlock(b.id, { reps: n })}
+                    />
                   </div>
+
                   <div className="flex justify-end"><Button variant="ghost" onClick={()=>removeBlock(b.id)}>Remove</Button></div>
                 </div>
               );
