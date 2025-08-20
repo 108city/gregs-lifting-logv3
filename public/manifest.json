@@ -1,6 +1,6 @@
 {
   "name": "Greg's Lifting Log",
-  "short_name": "Lifting Log",
+  "short_name": "LiftingLog",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#000000",
@@ -15,12 +15,6 @@
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
-    },
-    {
-      "src": "/icons/icon-512-maskable.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
     }
   ]
 }
