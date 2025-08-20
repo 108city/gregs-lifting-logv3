@@ -61,7 +61,7 @@ const weeksBetween = (startIso, endIso=today()) => {
 //       { id, name, startDate, days: [ { id, name, blocks: [ { id, exerciseId, sets, reps } ] } ] }
 //     ]
 //   },
-//   sessions: [ { id, date, dayId, entries: [ { id, blockId, exerciseId, sets: [ { reps, kg } ] } ] } ]
+//   sessions: [ { id, date, dayId, entries: [ { id, blockId, exerciseId, rating: 'up'|'hold'|'down'|null, sets: [ { reps, kg } ] } ] } ]
 // }
 
 const makeBlankWorkout = (name = "Workout 1") => ({
@@ -108,6 +108,7 @@ const migrate = (db) => {
     entries: Array.isArray(s.entries) ? s.entries.map(e => ({
       ...e,
       sets: Array.isArray(e.sets) ? e.sets : [],
+      // rating may not exist on older entries; that's fine
     })) : [],
   })) : [];
   base.exercises = Array.isArray(base.exercises) ? base.exercises : [];
@@ -388,7 +389,6 @@ function ratingBg(r) {
     ? "bg-red-600 text-white"
     : "bg-zinc-800 text-zinc-200";
 }
-
 function ratingDot(r) {
   return r === "up"
     ? "bg-green-600"
@@ -419,10 +419,22 @@ function LogTab({ db, setDb }) {
     entries: w.entries.map(e => e.id===entryId ? { ...e, sets: e.sets.map((s,i)=> i===setIdx ? { ...s, ...patch } : s) } : e)
   }));
 
+  // NEW: toggle rating helper
+  const setEntryRating = (entryId, rating) =>
+    setWorking(w => ({
+      ...w,
+      entries: w.entries.map(e =>
+        e.id === entryId
+          ? { ...e, rating: e.rating === rating ? null : rating }
+          : e
+      )
+    }));
+
   const saveSession = () => {
     if (!day) return;
     const normalizedEntries = working.entries.map(e => ({
       ...e,
+      rating: e.rating ?? null, // <-- keep marker
       sets: e.sets.map(st => ({
         reps: clampInt(st.reps === "" ? "0" : String(st.reps), 0, 10000),
         kg: clampFloat(st.kg === "" ? "0" : String(st.kg), 0, 100000)
@@ -466,10 +478,37 @@ function LogTab({ db, setDb }) {
                 const prevEntry = lastSession?.entries.find(e=>e.blockId===entry.blockId);
                 return (
                   <div key={entry.id} className="rounded border">
-                    <div className="p-3 flex items-center justify-between">
+                    <div className="p-3 flex items-center justify-between gap-2 flex-wrap">
                       <div>
                         <div className="font-medium">{ex?.name}</div>
                         <div className="text-xs text-muted-foreground">Target: {block?.sets} × {block?.reps}</div>
+                      </div>
+                      {/* NEW: rating buttons */}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          className={`h-7 px-2 ${entry.rating === "up" ? "bg-green-600 text-white" : "bg-zinc-800 text-zinc-200"}`}
+                          onClick={() => setEntryRating(entry.id, "up")}
+                          title="Go heavier next time"
+                        >
+                          ↑ More
+                        </Button>
+                        <Button
+                          size="sm"
+                          className={`h-7 px-2 ${entry.rating === "hold" ? "bg-amber-500 text-black" : "bg-zinc-800 text-zinc-200"}`}
+                          onClick={() => setEntryRating(entry.id, "hold")}
+                          title="Hold the weight"
+                        >
+                          → Hold
+                        </Button>
+                        <Button
+                          size="sm"
+                          className={`h-7 px-2 ${entry.rating === "down" ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-200"}`}
+                          onClick={() => setEntryRating(entry.id, "down")}
+                          title="Go lighter next time"
+                        >
+                          ↓ Down
+                        </Button>
                       </div>
                     </div>
                     <Separator />
@@ -501,7 +540,14 @@ function LogTab({ db, setDb }) {
           {viewing && (
             <ViewedSession session={viewing} db={db} onClose={()=>setViewing(null)} onLoadIntoEditor={() => {
               setDate(viewing.date);
-              setWorking({ date: viewing.date, entries: viewing.entries.map(e => ({...e, sets: e.sets.map(s=>({ reps: String(s.reps), kg: String(s.kg) })) })) });
+              setWorking({
+                date: viewing.date,
+                entries: viewing.entries.map(e => ({
+                  ...e,
+                  rating: e.rating ?? null, // NEW: keep marker when loading
+                  sets: e.sets.map(s => ({ reps: String(s.reps), kg: String(s.kg) }))
+                }))
+              });
               setViewing(null);
             }} />
           )}
@@ -522,6 +568,7 @@ function seedFromProgram(db, day, date, lastSession) {
         id: uid(),
         blockId: b.id,
         exerciseId: b.exerciseId,
+        rating: null, // NEW: seed with no marker
         sets: Array.from({ length: b.sets }, (_,i) => ({
           reps: String(b.reps),
           kg: prevEntry?.sets?.[i]?.kg !== undefined
@@ -574,7 +621,10 @@ function ViewedSession({ session, db, onClose, onLoadIntoEditor }) {
           const ex = db.exercises.find(x=>x.id===e.exerciseId);
           return (
             <div key={e.id} className="rounded border">
-              <div className="p-3 font-medium">{i+1}. {ex?.name || e.exerciseId}</div>
+              <div className="p-3 font-medium flex items-center gap-2">
+                <span className={`inline-block w-2.5 h-2.5 rounded-full ${ratingDot(e.rating)}`} />
+                {i+1}. {ex?.name || e.exerciseId}
+              </div>
               <Separator />
               <div className="p-3 space-y-1 text-sm">
                 {e.sets.map((s, idx)=>(
@@ -681,8 +731,8 @@ if (typeof window !== 'undefined' && !window.__LIFTLOG_TESTS__) {
     console.assert(clampFloat("5.5", 0, 10) === 5.5, 'clampFloat basic');
     const ex1 = { id: 'ex1', name: 'Bench' };
     const w1 = { id: 'w1', name: 'Workout 1', startDate: '2025-08-01', days: [{ id: 'd1', name: 'Day 1', blocks: [{ id: 'b1', exerciseId: 'ex1', sets: 3, reps: 5 }] }] };
-    const last = { id: 's0', date: '2025-08-01', dayId: 'd1', entries: [{ id:'e1', blockId:'b1', exerciseId:'ex1', sets:[{reps:5,kg:80},{reps:5,kg:80},{reps:5,kg:80}] }] };
-    const dbTest = { exercises:[ex1], program:{activeWorkoutId:'w1', workouts:[w1]}, sessions:[last, { id:'s1', date:'2025-08-05', dayId:'d1', entries:[{ id:'e2', blockId:'b1', exerciseId:'ex1', sets:[{reps:5,kg:82.5},{reps:5,kg:82.5},{reps:5,kg:82.5}] }]}] };
+    const last = { id: 's0', date: '2025-08-01', dayId: 'd1', entries: [{ id:'e1', blockId:'b1', exerciseId:'ex1', rating: null, sets:[{reps:5,kg:80},{reps:5,kg:80},{reps:5,kg:80}] }] };
+    const dbTest = { exercises:[ex1], program:{activeWorkoutId:'w1', workouts:[w1]}, sessions:[last, { id:'s1', date:'2025-08-05', dayId:'d1', entries:[{ id:'e2', blockId:'b1', exerciseId:'ex1', rating:'up', sets:[{reps:5,kg:82.5},{reps:5,kg:82.5},{reps:5,kg:82.5}] }]}] };
     const tr = buildTrend(dbTest, 'ex1');
     console.assert(Array.isArray(tr) && tr.length === 2 && tr[0].max === 80 && tr[1].max === 82.5, 'buildTrend aggregates by date');
     const seeded = seedFromProgram(dbTest, w1.days[0], '2025-08-02', last);
