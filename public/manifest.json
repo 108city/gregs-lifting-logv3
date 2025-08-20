@@ -1,0 +1,14 @@
+/public
+  ├── manifest.json
+  └── icons/
+        ├── icon-192.png
+        ├── icon-512.png
+        └── icon-512-maskable.png
+/src
+  ├── App.jsx
+  ├── main.jsx
+  ...
+index.html
+package.json
+vite.config.js
+...
