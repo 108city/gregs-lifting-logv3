@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { saveToCloud, loadFromCloud } from "./syncService";
 
-// Import your existing tabs
+// Import your tabs
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
@@ -35,9 +35,11 @@ export default function App() {
   const [db, setDb] = useState(() => {
     try {
       const local = localStorage.getItem("gregs-lifting-log");
-      return local ? JSON.parse(local) : { workouts: [], exercises: [] };
+      return local
+        ? JSON.parse(local)
+        : { workouts: [], exercises: [], progress: [], log: [] };
     } catch {
-      return { workouts: [], exercises: [] };
+      return { workouts: [], exercises: [], progress: [], log: [] };
     }
   });
 
@@ -47,9 +49,16 @@ export default function App() {
   useEffect(() => {
     async function init() {
       const cloudDb = await loadFromCloud();
-      if (cloudDb && cloudDb.workouts) {
-        setDb(cloudDb);
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
+      if (cloudDb) {
+        // Ensure all keys exist
+        const fixedDb = {
+          workouts: cloudDb.workouts || [],
+          exercises: cloudDb.exercises || [],
+          progress: cloudDb.progress || [],
+          log: cloudDb.log || [],
+        };
+        setDb(fixedDb);
+        localStorage.setItem("gregs-lifting-log", JSON.stringify(fixedDb));
       }
     }
     init();
@@ -107,7 +116,9 @@ export default function App() {
       <div className="mt-6 space-x-2">
         <button
           onClick={() => {
-            const blob = new Blob([JSON.stringify(db)], { type: "application/json" });
+            const blob = new Blob([JSON.stringify(db)], {
+              type: "application/json",
+            });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
@@ -129,7 +140,14 @@ export default function App() {
             reader.onload = (event) => {
               try {
                 const imported = JSON.parse(event.target.result);
-                setDb(imported);
+                // Ensure schema completeness when importing
+                const fixedDb = {
+                  workouts: imported.workouts || [],
+                  exercises: imported.exercises || [],
+                  progress: imported.progress || [],
+                  log: imported.log || [],
+                };
+                setDb(fixedDb);
               } catch (err) {
                 alert("Invalid file format");
               }
