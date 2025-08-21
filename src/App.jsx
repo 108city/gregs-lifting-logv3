@@ -240,8 +240,8 @@ export default function App() {
 
           {/* Export / Import buttons */}
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleExport}>Export JSON</Button>
-            <Button variant="outline" size="sm" onClick={handleImportClick}>Import (Merge)</Button>
+            <Button variant="outline" size="sm" onClick={handleExport}>Export Data</Button>
+            <Button variant="outline" size="sm" onClick={handleImportClick}>Import Data</Button>
             <input
               ref={fileInputRef}
               type="file"
