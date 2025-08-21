@@ -103,4 +103,42 @@ export default function App() {
         </TabsContent>
       </Tabs>
 
-      {/
+      {/* === Backup Export/Import buttons === */}
+      <div className="mt-6 space-x-2">
+        <button
+          onClick={() => {
+            const blob = new Blob([JSON.stringify(db)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "gregs-lifting-log.json";
+            a.click();
+          }}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+        >
+          Export Data
+        </button>
+
+        <input
+          type="file"
+          accept="application/json"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              try {
+                const imported = JSON.parse(event.target.result);
+                setDb(imported);
+              } catch (err) {
+                alert("Invalid file format");
+              }
+            };
+            reader.readAsText(file);
+          }}
+          className="text-white"
+        />
+      </div>
+    </div>
+  );
+}
