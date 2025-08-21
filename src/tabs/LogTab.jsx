@@ -1,136 +1,135 @@
 import React, { useState } from "react";
 
 export default function LogTab({ db, setDb }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [exercise, setExercise] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [exerciseId, setExerciseId] = useState("");
+  const [weight, setWeight] = useState("");
   const [sets, setSets] = useState(3);
-  const [reps, setReps] = useState(10);
-  const [weight, setWeight] = useState(0);
+  const [reps, setReps] = useState(8);
 
-  // Add workout entry
-  const addWorkout = () => {
-    if (!exercise) return alert("Please select an exercise");
+  const handleAdd = () => {
+    if (!exerciseId) {
+      alert("Please select an exercise");
+      return;
+    }
+
+    const exercise = db.exercises.find((e) => e.id === exerciseId);
+    if (!exercise) {
+      alert("Exercise not found");
+      return;
+    }
+
     const newWorkout = {
       date,
-      exercise,
-      sets,
-      reps,
-      weight,
-      status: "orange", // default marker
+      exercises: [
+        {
+          id: exercise.id,
+          name: exercise.name,
+          weight: Number(weight),
+          sets: Number(sets),
+          reps: Number(reps),
+        },
+      ],
     };
+
     setDb({
       ...db,
-      workouts: [...db.workouts, newWorkout],
+      workouts: [...(db.workouts || []), newWorkout],
     });
-    setExercise("");
-    setWeight(0);
-  };
 
-  // Update status marker (green/orange/red)
-  const updateStatus = (idx, status) => {
-    const updated = [...db.workouts];
-    updated[idx].status = status;
-    setDb({ ...db, workouts: updated });
+    setWeight("");
+    setSets(3);
+    setReps(8);
   };
 
   return (
     <div>
       <h2 className="text-xl font-bold mb-4">Log Workout</h2>
 
-      {/* Form */}
-      <div className="space-y-2 mb-6">
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="bg-gray-800 text-white px-2 py-1 rounded w-full"
-        />
-
-        <input
-          type="text"
-          placeholder="Exercise"
-          value={exercise}
-          onChange={(e) => setExercise(e.target.value)}
-          className="bg-gray-800 text-white px-2 py-1 rounded w-full"
-        />
-
-        <div className="flex space-x-2">
+      <div className="space-y-3">
+        {/* Date Picker */}
+        <div>
+          <label className="block">Date:</label>
           <input
-            type="number"
-            value={sets}
-            onChange={(e) => setSets(Number(e.target.value))}
-            className="bg-gray-800 text-white px-2 py-1 rounded w-1/3"
-            placeholder="Sets"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="bg-gray-800 text-white px-2 py-1 rounded"
           />
-          <input
-            type="number"
-            value={reps}
-            onChange={(e) => setReps(Number(e.target.value))}
-            className="bg-gray-800 text-white px-2 py-1 rounded w-1/3"
-            placeholder="Reps"
-          />
+        </div>
+
+        {/* Exercise Selector */}
+        <div>
+          <label className="block">Exercise:</label>
+          <select
+            value={exerciseId}
+            onChange={(e) => setExerciseId(e.target.value)}
+            className="bg-gray-800 text-white px-2 py-1 rounded"
+          >
+            <option value="">-- Select Exercise --</option>
+            {db.exercises.map((ex) => (
+              <option key={ex.id} value={ex.id}>
+                {ex.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Weight */}
+        <div>
+          <label className="block">Weight (kg):</label>
           <input
             type="number"
             value={weight}
-            onChange={(e) => setWeight(Number(e.target.value))}
-            className="bg-gray-800 text-white px-2 py-1 rounded w-1/3"
-            placeholder="Weight (kg)"
+            onChange={(e) => setWeight(e.target.value)}
+            className="bg-gray-800 text-white px-2 py-1 rounded"
+          />
+        </div>
+
+        {/* Sets */}
+        <div>
+          <label className="block">Sets:</label>
+          <input
+            type="number"
+            value={sets}
+            onChange={(e) => setSets(e.target.value)}
+            className="bg-gray-800 text-white px-2 py-1 rounded"
+          />
+        </div>
+
+        {/* Reps */}
+        <div>
+          <label className="block">Reps:</label>
+          <input
+            type="number"
+            value={reps}
+            onChange={(e) => setReps(e.target.value)}
+            className="bg-gray-800 text-white px-2 py-1 rounded"
           />
         </div>
 
         <button
-          onClick={addWorkout}
-          className="bg-blue-500 text-white px-4 py-2 rounded w-full"
+          onClick={handleAdd}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
         >
           Add Workout
         </button>
       </div>
 
-      {/* Workout log list */}
-      <div>
-        <h3 className="text-lg font-semibold mb-2">History</h3>
-        {db.workouts.length === 0 ? (
-          <p>No workouts logged yet.</p>
-        ) : (
-          <ul className="space-y-2">
-            {db.workouts.map((w, idx) => (
-              <li
-                key={idx}
-                className="flex justify-between items-center bg-gray-800 p-2 rounded"
-              >
-                <span>
-                  {w.date} - {w.exercise} ({w.sets}x{w.reps} @ {w.weight}kg)
-                </span>
-                <div className="flex space-x-2">
-                  <button
-                    className={`px-2 rounded ${
-                      w.status === "green" ? "bg-green-500" : "bg-gray-600"
-                    }`}
-                    onClick={() => updateStatus(idx, "green")}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    className={`px-2 rounded ${
-                      w.status === "orange" ? "bg-orange-500" : "bg-gray-600"
-                    }`}
-                    onClick={() => updateStatus(idx, "orange")}
-                  >
-                    →
-                  </button>
-                  <button
-                    className={`px-2 rounded ${
-                      w.status === "red" ? "bg-red-500" : "bg-gray-600"
-                    }`}
-                    onClick={() => updateStatus(idx, "red")}
-                  >
-                    ↓
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+      {/* Show logged workouts for today */}
+      <div className="mt-6">
+        <h3 className="text-lg font-semibold mb-2">Workouts Logged</h3>
+        {(db.workouts || [])
+          .filter((w) => w.date === date)
+          .map((w, i) => (
+            <div key={i} className="bg-gray-800 p-3 rounded mb-2">
+              {w.exercises.map((ex, j) => (
+                <p key={j}>
+                  {ex.name} — {ex.weight}kg × {ex.sets} sets × {ex.reps} reps
+                </p>
+              ))}
+            </div>
+          ))}
       </div>
     </div>
   );
