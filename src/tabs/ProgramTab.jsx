@@ -1,15 +1,30 @@
 import React, { useMemo, useState } from "react";
 
-// Small id + timestamp helpers
-const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+// --- tiny helpers (no uuid needed) ---
+const genId = () =>
+  Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+
 const nowIso = () => new Date().toISOString();
+
+const weeksBetween = (startIso, endIso = new Date().toISOString().slice(0, 10)) => {
+  if (!startIso) return 0;
+  try {
+    const a = new Date(startIso + "T00:00:00");
+    const b = new Date(endIso + "T00:00:00");
+    const ms = b - a;
+    if (isNaN(ms)) return 0;
+    return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24 * 7)));
+  } catch {
+    return 0;
+  }
+};
 
 export default function ProgramTab({ db, setDb }) {
   // ---------- Draft program builder ----------
   const [name, setName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [days, setDays] = useState([
-    { id: genId(), name: "Day 1", items: [], updatedAt: nowIso() },
+    { id: genId(), name: "Day 1", items: [] }, // items: [{ id, exerciseId, sets, reps }]
   ]);
 
   const exercisesSorted = useMemo(
@@ -17,19 +32,15 @@ export default function ProgramTab({ db, setDb }) {
     [db.exercises]
   );
 
+  const savedPrograms = db.programs || [];
+
+  // ---------- builder mutators ----------
   const addDay = () => {
-    setDays((d) => [
-      ...d,
-      { id: genId(), name: `Day ${d.length + 1}`, items: [], updatedAt: nowIso() },
-    ]);
+    setDays((d) => [...d, { id: genId(), name: `Day ${d.length + 1}`, items: [] }]);
   };
 
   const renameDay = (dayId, newName) => {
-    setDays((d) =>
-      d.map((day) =>
-        day.id === dayId ? { ...day, name: newName, updatedAt: nowIso() } : day
-      )
-    );
+    setDays((d) => d.map((day) => (day.id === dayId ? { ...day, name: newName } : day)));
   };
 
   const deleteDay = (dayId) => {
@@ -38,24 +49,16 @@ export default function ProgramTab({ db, setDb }) {
 
   const addExerciseToDay = (dayId, exerciseId) => {
     if (!exerciseId) return;
-    const ex = (db.exercises || []).find((e) => e.id === exerciseId);
-    if (!ex) return;
+    const found = (db.exercises || []).find((e) => e.id === exerciseId);
+    if (!found) return;
     setDays((d) =>
       d.map((day) =>
         day.id === dayId
           ? {
               ...day,
-              updatedAt: nowIso(),
               items: [
                 ...day.items,
-                {
-                  id: genId(),
-                  exerciseId,
-                  name: ex.name,
-                  sets: 3,
-                  reps: 10,
-                  updatedAt: nowIso(),
-                },
+                { id: genId(), exerciseId, sets: 3, reps: 10 },
               ],
             }
           : day
@@ -69,7 +72,6 @@ export default function ProgramTab({ db, setDb }) {
         day.id === dayId
           ? {
               ...day,
-              updatedAt: nowIso(),
               items: day.items.map((it) =>
                 it.id === itemId
                   ? {
@@ -78,7 +80,6 @@ export default function ProgramTab({ db, setDb }) {
                         field === "sets" || field === "reps"
                           ? Math.max(1, Math.min(1000, parseInt(value || "0", 10) || 1))
                           : value,
-                      updatedAt: nowIso(),
                     }
                   : it
               ),
@@ -88,16 +89,10 @@ export default function ProgramTab({ db, setDb }) {
     );
   };
 
-  const deleteItem = (dayId, itemId) => {
+  const deleteItemFromDraft = (dayId, itemId) => {
     setDays((d) =>
       d.map((day) =>
-        day.id === dayId
-          ? {
-              ...day,
-              updatedAt: nowIso(),
-              items: day.items.filter((it) => it.id !== itemId),
-            }
-          : day
+        day.id === dayId ? { ...day, items: day.items.filter((it) => it.id !== itemId) } : day
       )
     );
   };
@@ -105,7 +100,7 @@ export default function ProgramTab({ db, setDb }) {
   const resetDraft = () => {
     setName("");
     setStartDate("");
-    setDays([{ id: genId(), name: "Day 1", items: [], updatedAt: nowIso() }]);
+    setDays([{ id: genId(), name: "Day 1", items: [] }]);
   };
 
   const saveProgram = () => {
@@ -121,6 +116,7 @@ export default function ProgramTab({ db, setDb }) {
       alert("Add at least one day.");
       return;
     }
+
     const newProgram = {
       id: genId(),
       name: name.trim(),
@@ -128,6 +124,7 @@ export default function ProgramTab({ db, setDb }) {
       days,
       updatedAt: nowIso(),
     };
+
     setDb({
       ...db,
       programs: [...(db.programs || []), newProgram],
@@ -135,12 +132,42 @@ export default function ProgramTab({ db, setDb }) {
     resetDraft();
   };
 
-  // ---------- Editing saved programs (delete exercise/day/program) ----------
+  // ---------- saved programs mutators (edit/delete) ----------
+  const touchProgram = (p) => ({ ...p, updatedAt: nowIso() });
+
   const deleteSavedProgram = (programId) => {
     if (!confirm("Delete this program? This cannot be undone.")) return;
     setDb({
       ...db,
       programs: (db.programs || []).filter((p) => p.id !== programId),
+    });
+  };
+
+  const addDayToSavedProgram = (programId) => {
+    setDb({
+      ...db,
+      programs: (db.programs || []).map((p) =>
+        p.id !== programId
+          ? p
+          : touchProgram({
+              ...p,
+              days: [...p.days, { id: genId(), name: `Day ${p.days.length + 1}`, items: [] }],
+            })
+      ),
+    });
+  };
+
+  const renameSavedDay = (programId, dayId, newName) => {
+    setDb({
+      ...db,
+      programs: (db.programs || []).map((p) =>
+        p.id !== programId
+          ? p
+          : touchProgram({
+              ...p,
+              days: p.days.map((d) => (d.id === dayId ? { ...d, name: newName } : d)),
+            })
+      ),
     });
   };
 
@@ -150,7 +177,65 @@ export default function ProgramTab({ db, setDb }) {
       programs: (db.programs || []).map((p) =>
         p.id !== programId
           ? p
-          : { ...p, updatedAt: nowIso(), days: p.days.filter((d) => d.id !== dayId) }
+          : touchProgram({
+              ...p,
+              days: p.days.filter((d) => d.id !== dayId),
+            })
+      ),
+    });
+  };
+
+  const addExerciseToSavedDay = (programId, dayId, exerciseId) => {
+    const found = (db.exercises || []).find((e) => e.id === exerciseId);
+    if (!found) return;
+
+    setDb({
+      ...db,
+      programs: (db.programs || []).map((p) =>
+        p.id !== programId
+          ? p
+          : touchProgram({
+              ...p,
+              days: p.days.map((d) =>
+                d.id !== dayId
+                  ? d
+                  : {
+                      ...d,
+                      items: [...d.items, { id: genId(), exerciseId, sets: 3, reps: 10 }],
+                    }
+              ),
+            })
+      ),
+    });
+  };
+
+  const updateSavedItem = (programId, dayId, itemId, field, value) => {
+    setDb({
+      ...db,
+      programs: (db.programs || []).map((p) =>
+        p.id !== programId
+          ? p
+          : touchProgram({
+              ...p,
+              days: p.days.map((d) =>
+                d.id !== dayId
+                  ? d
+                  : {
+                      ...d,
+                      items: d.items.map((it) =>
+                        it.id !== itemId
+                          ? it
+                          : {
+                              ...it,
+                              [field]:
+                                field === "sets" || field === "reps"
+                                  ? Math.max(1, Math.min(1000, parseInt(value || "0", 10) || 1))
+                                  : value,
+                            }
+                      ),
+                    }
+              ),
+            })
       ),
     });
   };
@@ -161,30 +246,288 @@ export default function ProgramTab({ db, setDb }) {
       programs: (db.programs || []).map((p) =>
         p.id !== programId
           ? p
-          : {
+          : touchProgram({
               ...p,
-              updatedAt: nowIso(),
               days: p.days.map((d) =>
-                d.id !== dayId
-                  ? d
-                  : {
-                      ...d,
-                      updatedAt: nowIso(),
-                      items: d.items.filter((it) => it.id !== itemId),
-                    }
+                d.id !== dayId ? d : { ...d, items: d.items.filter((it) => it.id !== itemId) }
               ),
-            }
+            })
       ),
     });
   };
 
-  const savedPrograms = db.programs || [];
-
+  // ---------- UI ----------
   return (
-    <div className="space-y-6">
-      {/* Draft Builder */}
-      {/* (same JSX as before — unchanged except logic above) */}
-      {/* ... */}
+    <div className="space-y-8">
+      {/* ================= Draft Builder ================= */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold">Create a Program</h2>
+
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+          placeholder="Program name (e.g., Push/Pull/Legs)"
+        />
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="space-y-1 sm:col-span-1">
+            <label className="text-sm text-zinc-300">Start date</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+            />
+          </div>
+        </div>
+
+        {/* Days in Builder */}
+        <div className="space-y-3">
+          {days.map((day) => (
+            <div key={day.id} className="rounded border border-zinc-700 p-3 space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 justify-between">
+                <div className="flex items-center gap-2 w-full">
+                  <input
+                    value={day.name}
+                    onChange={(e) => renameDay(day.id, e.target.value)}
+                    className="flex-1 p-2 rounded bg-zinc-900 text-zinc-100"
+                  />
+                  <button
+                    onClick={() => deleteDay(day.id)}
+                    className="px-3 py-2 rounded bg-red-600 text-white"
+                    title="Delete this day"
+                  >
+                    Delete Day
+                  </button>
+                </div>
+              </div>
+
+              {/* Add exercise to this draft day */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) {
+                      addExerciseToDay(day.id, v);
+                      e.target.value = "";
+                    }
+                  }}
+                  className="p-2 rounded bg-zinc-900 text-zinc-100"
+                >
+                  <option value="" disabled>
+                    + Add exercise
+                  </option>
+                  {exercisesSorted.map((ex) => (
+                    <option key={ex.id} value={ex.id}>
+                      {ex.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Items in this draft day */}
+              <div className="space-y-2">
+                {day.items.length === 0 && (
+                  <div className="text-sm text-zinc-400">No exercises yet.</div>
+                )}
+                {day.items.map((it, idx) => {
+                  const ex = (db.exercises || []).find((e) => e.id === it.exerciseId);
+                  return (
+                    <div
+                      key={it.id}
+                      className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center"
+                    >
+                      <div className="sm:col-span-2">
+                        <div className="text-zinc-100">
+                          {idx + 1}. {ex?.name || "(deleted exercise)"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-zinc-300">Sets</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={it.sets}
+                          onChange={(e) => updateItemField(day.id, it.id, "sets", e.target.value)}
+                          className="w-20 p-2 rounded bg-zinc-900 text-zinc-100"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-zinc-300">Reps</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={it.reps}
+                          onChange={(e) => updateItemField(day.id, it.id, "reps", e.target.value)}
+                          className="w-20 p-2 rounded bg-zinc-900 text-zinc-100"
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => deleteItemFromDraft(day.id, it.id)}
+                          className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
+                          title="Remove exercise"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          <div className="flex gap-2">
+            <button
+              onClick={addDay}
+              className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
+            >
+              + Add Day
+            </button>
+            <button
+              onClick={saveProgram}
+              className="px-4 py-2 rounded bg-blue-600 text-white"
+            >
+              Save Program
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ================= Saved Programs ================= */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold">Saved Programs</h2>
+        {savedPrograms.length === 0 && (
+          <div className="text-sm text-zinc-400">No programs yet.</div>
+        )}
+
+        {savedPrograms.map((p) => (
+          <div key={p.id} className="rounded border border-zinc-700 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-semibold text-zinc-100">{p.name}</div>
+                <div className="text-xs text-zinc-400">
+                  Start: {p.startDate || "—"} · Week {weeksBetween(p.startDate) + 1}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => addDayToSavedProgram(p.id)}
+                  className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
+                  title="Add a new training day"
+                >
+                  + Add Day
+                </button>
+                <button
+                  onClick={() => deleteSavedProgram(p.id)}
+                  className="px-3 py-2 rounded bg-red-600 text-white"
+                >
+                  Delete Program
+                </button>
+              </div>
+            </div>
+
+            {/* Days inside saved program */}
+            <div className="space-y-2">
+              {p.days.map((d) => (
+                <div key={d.id} className="rounded border border-zinc-700 p-2 space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                    <input
+                      value={d.name}
+                      onChange={(e) => renameSavedDay(p.id, d.id, e.target.value)}
+                      className="flex-1 p-2 rounded bg-zinc-900 text-zinc-100"
+                    />
+                    <div className="flex gap-2">
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v) {
+                            addExerciseToSavedDay(p.id, d.id, v);
+                            e.target.value = "";
+                          }
+                        }}
+                        className="p-2 rounded bg-zinc-900 text-zinc-100"
+                      >
+                        <option value="" disabled>
+                          + Add exercise
+                        </option>
+                        {exercisesSorted.map((ex) => (
+                          <option key={ex.id} value={ex.id}>
+                            {ex.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => deleteSavedDay(p.id, d.id)}
+                        className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
+                      >
+                        Delete Day
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Items */}
+                  <div className="space-y-1 text-sm">
+                    {d.items.length === 0 && (
+                      <div className="text-zinc-400">No exercises.</div>
+                    )}
+                    {d.items.map((it, idx) => {
+                      const ex = (db.exercises || []).find((e) => e.id === it.exerciseId);
+                      return (
+                        <div
+                          key={it.id}
+                          className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center bg-zinc-900 rounded px-2 py-2"
+                        >
+                          <div className="sm:col-span-2">
+                            {idx + 1}. {ex?.name || "(deleted exercise)"}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-zinc-300">Sets</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={it.sets}
+                              onChange={(e) =>
+                                updateSavedItem(p.id, d.id, it.id, "sets", e.target.value)
+                              }
+                              className="w-20 p-1 rounded bg-zinc-800 text-zinc-100"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-zinc-300">Reps</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={it.reps}
+                              onChange={(e) =>
+                                updateSavedItem(p.id, d.id, it.id, "reps", e.target.value)
+                              }
+                              className="w-20 p-1 rounded bg-zinc-800 text-zinc-100"
+                            />
+                          </div>
+                          <div className="flex justify-end">
+                            <button
+                              onClick={() => deleteSavedItem(p.id, d.id, it.id)}
+                              className="px-3 py-1 rounded bg-zinc-800 text-zinc-200"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
