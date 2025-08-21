@@ -1,21 +1,14 @@
 import { supabase } from "./supabaseClient";
 
-// Save the full DB snapshot to Supabase under a fixed ID
+// Use a fixed ID for your data (single user setup)
+const FIXED_ID = "gregs-device";
+
+// Save the full DB snapshot to Supabase
 export async function saveToCloud(db) {
   try {
     const { error } = await supabase
-      .from("workouts")
-      .upsert(
-        [
-          {
-            id: "gregs-device",
-            data: db,
-            last_updated: new Date().toISOString(),
-          },
-        ],
-        { onConflict: ["id"] }
-      );
-
+      .from("lifting_logs")
+      .upsert([{ id: FIXED_ID, data: db }], { onConflict: ["id"] });
     if (error) throw error;
     console.log("✅ Saved to Supabase");
   } catch (err) {
@@ -23,23 +16,19 @@ export async function saveToCloud(db) {
   }
 }
 
-// Load the DB snapshot + timestamp from Supabase
+// Load the DB snapshot from Supabase
 export async function loadFromCloud() {
   try {
     const { data, error } = await supabase
-      .from("workouts")
-      .select("data, last_updated")
-      .eq("id", "gregs-device")
+      .from("lifting_logs")
+      .select("data")
+      .eq("id", FIXED_ID)
       .single();
-
     if (error && error.code !== "PGRST116") throw error;
     console.log("✅ Loaded from Supabase");
-    return {
-      data: data?.data || null,
-      lastUpdated: data?.last_updated || null,
-    };
+    return data?.data || null;
   } catch (err) {
     console.error("❌ Error loading from Supabase:", err.message);
-    return { data: null, lastUpdated: null };
+    return null;
   }
 }
