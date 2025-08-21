@@ -55,10 +55,19 @@ export default function App() {
     init();
   }, []);
 
-  // 💾 Save changes to localStorage AND Supabase
+  // 💾 Save changes to localStorage AND Supabase (safe version)
   useEffect(() => {
     localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
-    saveToCloud(db);
+
+    async function sync() {
+      const success = await saveToCloud(db);
+      if (!success) {
+        console.warn("⚠️ Cloud sync failed — keeping data in localStorage.");
+        // Optional retry after 10 seconds
+        setTimeout(() => saveToCloud(db), 10000);
+      }
+    }
+    sync();
   }, [db]);
 
   // === UI ===
