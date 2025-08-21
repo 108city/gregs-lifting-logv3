@@ -124,11 +124,133 @@ export default function App() {
   const [tab, setTab] = useState("log");
   const activeWorkout = getActiveWorkout(db);
 
+  // ------- Export / Import helpers -------
+  const download = (text, filename) => {
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExport = () => {
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g, "-");
+    download(JSON.stringify(db, null, 2), `gregs-lifting-log-${stamp}.json`);
+  };
+
+  // merge arrays by id, skipping duplicates
+  const mergeById = (currentArr = [], incomingArr = []) => {
+    const byId = new Map(currentArr.map(x => [x.id, x]));
+    for (const it of incomingArr) {
+      if (!byId.has(it.id)) byId.set(it.id, it);
+    }
+    return Array.from(byId.values());
+  };
+
+  // merge full db safely (no destructive overwrites)
+  const mergeDb = (current, incomingRaw) => {
+    const incoming = migrate({ ...defaultDb(), ...incomingRaw });
+
+    // exercises
+    const exercises = mergeById(current.exercises, incoming.exercises);
+
+    // workouts (including days/blocks)
+    const workouts = mergeById(current.program.workouts, incoming.program.workouts).map(w => {
+      const curW = current.program.workouts.find(x => x.id === w.id);
+      const incW = incoming.program.workouts.find(x => x.id === w.id);
+      const pick = incW || curW || w;
+      const curDays = curW?.days ?? [];
+      const incDays = incW?.days ?? [];
+      const days = mergeById(curDays, incDays).map(d => {
+        const curD = curDays.find(x => x.id === d.id);
+        const incD = incDays.find(x => x.id === d.id);
+        const curBlocks = curD?.blocks ?? [];
+        const incBlocks = incD?.blocks ?? [];
+        return { ...d, blocks: mergeById(curBlocks, incBlocks) };
+      });
+      return { ...pick, days };
+    });
+
+    // sessions (and their entries/sets)
+    const sessions = mergeById(current.sessions, incoming.sessions).map(s => {
+      const curS = current.sessions.find(x => x.id === s.id);
+      const incS = incoming.sessions.find(x => x.id === s.id);
+      const curEntries = curS?.entries ?? [];
+      const incEntries = incS?.entries ?? [];
+      const entries = mergeById(curEntries, incEntries).map(e => {
+        const curE = curEntries.find(x => x.id === e.id);
+        const incE = incEntries.find(x => x.id === e.id);
+        const curSets = curE?.sets ?? [];
+        const incSets = incE?.sets ?? [];
+        // sets have no id in your model; merge by index (keep current if conflict)
+        const maxLen = Math.max(curSets.length, incSets.length);
+        const sets = Array.from({ length: maxLen }, (_, i) => curSets[i] ?? incSets[i]).filter(Boolean);
+        return { ...e, sets };
+      });
+      return { ...(incS || curS || s), entries };
+    });
+
+    // active workout: keep current if valid else take incoming, else first
+    let activeWorkoutId = current.program.activeWorkoutId;
+    const allIds = new Set(workouts.map(w => w.id));
+    if (!activeWorkoutId || !allIds.has(activeWorkoutId)) {
+      if (incoming.program.activeWorkoutId && allIds.has(incoming.program.activeWorkoutId)) {
+        activeWorkoutId = incoming.program.activeWorkoutId;
+      } else {
+        activeWorkoutId = workouts[0]?.id ?? null;
+      }
+    }
+
+    return {
+      exercises,
+      program: { activeWorkoutId, workouts },
+      sessions
+    };
+  };
+
+  const fileInputRef = React.useRef(null);
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so same file can be chosen again later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const incoming = JSON.parse(text);
+
+      if (!incoming || typeof incoming !== "object") throw new Error("Invalid file");
+      const next = mergeDb(db, incoming);
+      setDb(next);
+      alert("Import (merge) complete ✅ — your existing data was kept, and new items were added.");
+    } catch (err) {
+      console.error(err);
+      alert("Import failed. Make sure you selected a JSON export from this app.");
+    }
+  };
+
   return (
     <div className="min-h-screen p-4 md:p-8 bg-black text-blue-500">
       <div className="max-w-5xl mx-auto space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-bold">Greg's Lifting Log</h1>
+
+          {/* Export / Import buttons */}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport}>Export JSON</Button>
+            <Button variant="outline" size="sm" onClick={handleImportClick}>Import (Merge)</Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+          </div>
+
           {activeWorkout && (
             <div className="text-right text-xs md:text-sm">
               <div className="font-medium">{activeWorkout.name}</div>
