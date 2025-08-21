@@ -1,12 +1,34 @@
 import React, { useEffect, useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { saveToCloud, loadFromCloud } from "./syncService";
 
-// Import the new tab files from src/tabs/
+// Import your existing tabs
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
+
+// === Simple Tabs Implementation ===
+function Tabs({ children }) {
+  return <div>{children}</div>;
+}
+function TabsList({ children }) {
+  return <div className="flex space-x-2 mb-4">{children}</div>;
+}
+function TabsTrigger({ value, activeTab, setActiveTab, children }) {
+  return (
+    <button
+      onClick={() => setActiveTab(value)}
+      className={`px-3 py-1 rounded ${
+        activeTab === value ? "bg-blue-500 text-white" : "bg-gray-700 text-gray-300"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+function TabsContent({ value, activeTab, children }) {
+  return activeTab === value ? <div>{children}</div> : null;
+}
 
 export default function App() {
   // === State management ===
@@ -19,11 +41,13 @@ export default function App() {
     }
   });
 
+  const [activeTab, setActiveTab] = useState("log");
+
   // 🔄 Load from Supabase when app starts
   useEffect(() => {
     async function init() {
       const cloudDb = await loadFromCloud();
-      if (cloudDb) {
+      if (cloudDb && cloudDb.workouts) {
         setDb(cloudDb);
         localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
       }
@@ -42,24 +66,32 @@ export default function App() {
     <div className="min-h-screen bg-black text-blue-500 p-4">
       <h1 className="text-3xl font-bold mb-6">Greg&apos;s Lifting Log</h1>
 
-      <Tabs defaultValue="log" className="w-full">
-        <TabsList className="grid grid-cols-4 gap-2 mb-4">
-          <TabsTrigger value="log">Log</TabsTrigger>
-          <TabsTrigger value="progress">Progress</TabsTrigger>
-          <TabsTrigger value="program">Program</TabsTrigger>
-          <TabsTrigger value="exercises">Exercises</TabsTrigger>
+      <Tabs>
+        <TabsList>
+          <TabsTrigger value="log" activeTab={activeTab} setActiveTab={setActiveTab}>
+            Log
+          </TabsTrigger>
+          <TabsTrigger value="progress" activeTab={activeTab} setActiveTab={setActiveTab}>
+            Progress
+          </TabsTrigger>
+          <TabsTrigger value="program" activeTab={activeTab} setActiveTab={setActiveTab}>
+            Program
+          </TabsTrigger>
+          <TabsTrigger value="exercises" activeTab={activeTab} setActiveTab={setActiveTab}>
+            Exercises
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="log">
+        <TabsContent value="log" activeTab={activeTab}>
           <LogTab db={db} setDb={setDb} />
         </TabsContent>
-        <TabsContent value="progress">
+        <TabsContent value="progress" activeTab={activeTab}>
           <ProgressTab db={db} />
         </TabsContent>
-        <TabsContent value="program">
+        <TabsContent value="program" activeTab={activeTab}>
           <ProgramTab db={db} setDb={setDb} />
         </TabsContent>
-        <TabsContent value="exercises">
+        <TabsContent value="exercises" activeTab={activeTab}>
           <ExercisesTab db={db} setDb={setDb} />
         </TabsContent>
       </Tabs>
@@ -68,9 +100,7 @@ export default function App() {
       <div className="mt-6 space-x-2">
         <button
           onClick={() => {
-            const blob = new Blob([JSON.stringify(db)], {
-              type: "application/json",
-            });
+            const blob = new Blob([JSON.stringify(db)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
