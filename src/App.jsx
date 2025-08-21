@@ -22,10 +22,17 @@ export default function App() {
   // 🔄 Load from Supabase when app starts
   useEffect(() => {
     async function init() {
-      const cloudDb = await loadFromCloud();
-      if (cloudDb) {
-        setDb(cloudDb);
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
+      try {
+        const cloudDb = await loadFromCloud();
+        if (cloudDb) {
+          console.log("✅ Cloud data loaded");
+          setDb(cloudDb);
+          localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
+        } else {
+          console.log("ℹ️ No cloud data found, keeping local state");
+        }
+      } catch (err) {
+        console.error("❌ Error loading from cloud:", err.message);
       }
     }
     init();
@@ -33,8 +40,12 @@ export default function App() {
 
   // 💾 Save changes to localStorage AND Supabase
   useEffect(() => {
-    localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
-    saveToCloud(db);
+    try {
+      localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
+      saveToCloud(db);
+    } catch (err) {
+      console.error("❌ Error saving locally:", err.message);
+    }
   }, [db]);
 
   // === UI ===
