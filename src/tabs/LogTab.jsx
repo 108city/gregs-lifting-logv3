@@ -1,35 +1,26 @@
 import React, { useState } from "react";
 
 export default function LogTab({ db, setDb }) {
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [exerciseId, setExerciseId] = useState("");
-  const [weight, setWeight] = useState("");
+  const [selectedExercise, setSelectedExercise] = useState("");
   const [sets, setSets] = useState(3);
-  const [reps, setReps] = useState(8);
+  const [reps, setReps] = useState(10);
 
-  const handleAdd = () => {
-    if (!exerciseId) {
-      alert("Please select an exercise");
-      return;
-    }
+  // Group exercises by category
+  const grouped = (db.exercises || []).reduce((acc, ex) => {
+    if (!acc[ex.category]) acc[ex.category] = [];
+    acc[ex.category].push(ex);
+    return acc;
+  }, {});
 
-    const exercise = db.exercises.find((e) => e.id === exerciseId);
-    if (!exercise) {
-      alert("Exercise not found");
-      return;
-    }
+  const addWorkout = () => {
+    if (!selectedExercise) return;
 
     const newWorkout = {
-      date,
-      exercises: [
-        {
-          id: exercise.id,
-          name: exercise.name,
-          weight: Number(weight),
-          sets: Number(sets),
-          reps: Number(reps),
-        },
-      ],
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      exercise: selectedExercise,
+      sets,
+      reps,
     };
 
     setDb({
@@ -37,53 +28,35 @@ export default function LogTab({ db, setDb }) {
       workouts: [...(db.workouts || []), newWorkout],
     });
 
-    setWeight("");
+    setSelectedExercise("");
     setSets(3);
-    setReps(8);
+    setReps(10);
   };
 
   return (
     <div>
-      <h2 className="text-xl font-bold mb-4">Log Workout</h2>
+      <h2 className="text-xl font-bold mb-4">Workout Log</h2>
 
       <div className="space-y-3">
-        {/* Date Picker */}
-        <div>
-          <label className="block">Date:</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="bg-gray-800 text-white px-2 py-1 rounded"
-          />
-        </div>
-
-        {/* Exercise Selector */}
+        {/* Exercise Selector with categories */}
         <div>
           <label className="block">Exercise:</label>
           <select
-            value={exerciseId}
-            onChange={(e) => setExerciseId(e.target.value)}
-            className="bg-gray-800 text-white px-2 py-1 rounded"
+            value={selectedExercise}
+            onChange={(e) => setSelectedExercise(e.target.value)}
+            className="bg-gray-800 text-white px-2 py-1 rounded w-full"
           >
-            <option value="">-- Select Exercise --</option>
-            {db.exercises.map((ex) => (
-              <option key={ex.id} value={ex.id}>
-                {ex.name}
-              </option>
+            <option value="">-- Select an exercise --</option>
+            {Object.keys(grouped).map((cat) => (
+              <optgroup key={cat} label={cat}>
+                {grouped[cat].map((ex) => (
+                  <option key={ex.id} value={ex.name}>
+                    {ex.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
-        </div>
-
-        {/* Weight */}
-        <div>
-          <label className="block">Weight (kg):</label>
-          <input
-            type="number"
-            value={weight}
-            onChange={(e) => setWeight(e.target.value)}
-            className="bg-gray-800 text-white px-2 py-1 rounded"
-          />
         </div>
 
         {/* Sets */}
@@ -92,7 +65,7 @@ export default function LogTab({ db, setDb }) {
           <input
             type="number"
             value={sets}
-            onChange={(e) => setSets(e.target.value)}
+            onChange={(e) => setSets(Number(e.target.value))}
             className="bg-gray-800 text-white px-2 py-1 rounded"
           />
         </div>
@@ -103,33 +76,35 @@ export default function LogTab({ db, setDb }) {
           <input
             type="number"
             value={reps}
-            onChange={(e) => setReps(e.target.value)}
+            onChange={(e) => setReps(Number(e.target.value))}
             className="bg-gray-800 text-white px-2 py-1 rounded"
           />
         </div>
 
         <button
-          onClick={handleAdd}
+          onClick={addWorkout}
           className="bg-blue-500 text-white px-4 py-2 rounded"
         >
           Add Workout
         </button>
       </div>
 
-      {/* Show logged workouts for today */}
+      {/* Show logged workouts */}
       <div className="mt-6">
-        <h3 className="text-lg font-semibold mb-2">Workouts Logged</h3>
-        {(db.workouts || [])
-          .filter((w) => w.date === date)
-          .map((w, i) => (
-            <div key={i} className="bg-gray-800 p-3 rounded mb-2">
-              {w.exercises.map((ex, j) => (
-                <p key={j}>
-                  {ex.name} — {ex.weight}kg × {ex.sets} sets × {ex.reps} reps
-                </p>
-              ))}
-            </div>
-          ))}
+        <h3 className="text-lg font-semibold mb-2">Workout History</h3>
+        {(db.workouts || []).length === 0 && (
+          <p className="text-gray-400">No workouts logged yet.</p>
+        )}
+        {(db.workouts || []).map((w) => (
+          <div
+            key={w.id}
+            className="flex justify-between items-center bg-gray-800 p-2 rounded mb-2"
+          >
+            <span>
+              {new Date(w.date).toLocaleDateString()} — {w.exercise} ({w.sets}×{w.reps})
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
