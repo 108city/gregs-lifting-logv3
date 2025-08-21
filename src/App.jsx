@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { saveToCloud, loadFromCloud } from "./syncService";
 
-// Import your existing tabs
+// Import the new tab files from src/tabs/
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
@@ -22,17 +22,10 @@ export default function App() {
   // 🔄 Load from Supabase when app starts
   useEffect(() => {
     async function init() {
-      try {
-        const cloudDb = await loadFromCloud();
-        if (cloudDb) {
-          console.log("✅ Cloud data loaded");
-          setDb(cloudDb);
-          localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
-        } else {
-          console.log("ℹ️ No cloud data found, keeping local state");
-        }
-      } catch (err) {
-        console.error("❌ Error loading from cloud:", err.message);
+      const cloudDb = await loadFromCloud();
+      if (cloudDb) {
+        setDb(cloudDb);
+        localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
       }
     }
     init();
@@ -40,12 +33,8 @@ export default function App() {
 
   // 💾 Save changes to localStorage AND Supabase
   useEffect(() => {
-    try {
-      localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
-      saveToCloud(db);
-    } catch (err) {
-      console.error("❌ Error saving locally:", err.message);
-    }
+    localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
+    saveToCloud(db);
   }, [db]);
 
   // === UI ===
@@ -79,7 +68,9 @@ export default function App() {
       <div className="mt-6 space-x-2">
         <button
           onClick={() => {
-            const blob = new Blob([JSON.stringify(db)], { type: "application/json" });
+            const blob = new Blob([JSON.stringify(db)], {
+              type: "application/json",
+            });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
