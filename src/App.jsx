@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { saveToCloud, loadFromCloud } from "./syncService";
 
-// Import your tabs
+// Import your existing tabs
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
@@ -35,11 +35,9 @@ export default function App() {
   const [db, setDb] = useState(() => {
     try {
       const local = localStorage.getItem("gregs-lifting-log");
-      return local
-        ? JSON.parse(local)
-        : { workouts: [], exercises: [], progress: [], log: [] };
+      return local ? JSON.parse(local) : { workouts: [], exercises: [], programs: [], progress: [] };
     } catch {
-      return { workouts: [], exercises: [], progress: [], log: [] };
+      return { workouts: [], exercises: [], programs: [], progress: [] };
     }
   });
 
@@ -50,15 +48,8 @@ export default function App() {
     async function init() {
       const cloudDb = await loadFromCloud();
       if (cloudDb) {
-        // Ensure all keys exist
-        const fixedDb = {
-          workouts: cloudDb.workouts || [],
-          exercises: cloudDb.exercises || [],
-          progress: cloudDb.progress || [],
-          log: cloudDb.log || [],
-        };
-        setDb(fixedDb);
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(fixedDb));
+        setDb(cloudDb);
+        localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
       }
     }
     init();
@@ -111,52 +102,6 @@ export default function App() {
           <ExercisesTab db={db} setDb={setDb} />
         </TabsContent>
       </Tabs>
-
-      {/* === Backup Export/Import buttons === */}
-      <div className="mt-6 space-x-2">
-        <button
-          onClick={() => {
-            const blob = new Blob([JSON.stringify(db)], {
-              type: "application/json",
-            });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "gregs-lifting-log.json";
-            a.click();
-          }}
-          className="bg-blue-500 text-white px-4 py-2 rounded"
-        >
-          Export Data
-        </button>
-
-        <input
-          type="file"
-          accept="application/json"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              try {
-                const imported = JSON.parse(event.target.result);
-                // Ensure schema completeness when importing
-                const fixedDb = {
-                  workouts: imported.workouts || [],
-                  exercises: imported.exercises || [],
-                  progress: imported.progress || [],
-                  log: imported.log || [],
-                };
-                setDb(fixedDb);
-              } catch (err) {
-                alert("Invalid file format");
-              }
-            };
-            reader.readAsText(file);
-          }}
-          className="text-white"
-        />
-      </div>
     </div>
   );
 }
