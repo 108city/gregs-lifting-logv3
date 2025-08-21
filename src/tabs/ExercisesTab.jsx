@@ -1,75 +1,64 @@
 import React, { useState } from "react";
-import { v4 as uuidv4 } from "uuid";
 
 export default function ExercisesTab({ db, setDb }) {
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("Other");
+  const [newExercise, setNewExercise] = useState("");
 
-  // === Add Exercise ===
+  // Helper: generate a unique ID without uuid
+  const generateId = () =>
+    Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+
   const addExercise = () => {
-    if (!name.trim()) return;
-    const newExercise = { id: uuidv4(), name, category };
-    setDb({
+    if (!newExercise.trim()) return;
+
+    const updated = {
       ...db,
-      exercises: [...db.exercises, newExercise],
-    });
-    setName("");
-    setCategory("Other");
+      exercises: [
+        ...db.exercises,
+        { id: generateId(), name: newExercise, category: "Other" },
+      ],
+    };
+    setDb(updated);
+    setNewExercise("");
   };
 
-  // === Delete Exercise ===
   const deleteExercise = (id) => {
-    setDb({
+    const updated = {
       ...db,
       exercises: db.exercises.filter((ex) => ex.id !== id),
-    });
+    };
+    setDb(updated);
   };
 
   return (
     <div>
-      <h2 className="text-xl font-bold mb-4">Exercises</h2>
+      <h2 className="text-xl font-semibold mb-4">Exercises</h2>
 
-      {/* Add Form */}
-      <div className="mb-4 flex space-x-2">
+      <div className="flex space-x-2 mb-4">
         <input
           type="text"
-          placeholder="Exercise name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="px-2 py-1 rounded bg-gray-800 text-white"
+          value={newExercise}
+          onChange={(e) => setNewExercise(e.target.value)}
+          placeholder="Add exercise"
+          className="px-2 py-1 rounded text-black"
         />
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="px-2 py-1 rounded bg-gray-800 text-white"
-        >
-          <option>Upper Body</option>
-          <option>Lower Body</option>
-          <option>Core</option>
-          <option>Cardio</option>
-          <option>Other</option>
-        </select>
         <button
           onClick={addExercise}
-          className="bg-green-600 px-3 py-1 rounded text-white"
+          className="bg-blue-500 text-white px-3 py-1 rounded"
         >
           Add
         </button>
       </div>
 
-      {/* Exercise List */}
       <ul className="space-y-2">
-        {db.exercises.map((exercise) => (
+        {db.exercises.map((ex) => (
           <li
-            key={exercise.id}
+            key={ex.id}
             className="flex justify-between items-center bg-gray-800 px-3 py-2 rounded"
           >
-            <span>
-              {exercise.name} <span className="text-sm text-gray-400">({exercise.category})</span>
-            </span>
+            <span>{ex.name}</span>
             <button
-              onClick={() => deleteExercise(exercise.id)}
-              className="bg-red-600 px-2 py-1 rounded text-white"
+              onClick={() => deleteExercise(ex.id)}
+              className="bg-red-500 text-white px-2 py-1 rounded text-sm"
             >
               Delete
             </button>
