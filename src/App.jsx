@@ -1,48 +1,49 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { LogTab } from "./LogTab";
-import { ProgressTab } from "./ProgressTab";
-import { ProgramTab } from "./ProgramTab";
-import { ExercisesTab } from "./ExercisesTab";
+import { saveToCloud, loadFromCloud } from "./syncService";
 
-import { syncFromCloud, saveToCloud } from "./syncService";
-
-const STORAGE_KEY = "lifting-log-db";
+// Import your existing tabs
+import LogTab from "./tabs/LogTab";
+import ProgressTab from "./tabs/ProgressTab";
+import ProgramTab from "./tabs/ProgramTab";
+import ExercisesTab from "./tabs/ExercisesTab";
 
 export default function App() {
+  // === State management ===
   const [db, setDb] = useState(() => {
     try {
-      const cur = localStorage.getItem(STORAGE_KEY);
-      return cur ? JSON.parse(cur) : { workouts: [], exercises: [] };
+      const local = localStorage.getItem("gregs-lifting-log");
+      return local ? JSON.parse(local) : { workouts: [], exercises: [] };
     } catch {
       return { workouts: [], exercises: [] };
     }
   });
 
-  // --- Sync with Supabase on startup ---
+  // 🔄 Load from Supabase when app starts
   useEffect(() => {
-    async function initSync() {
-      const cloudDb = await syncFromCloud(db);
+    async function init() {
+      const cloudDb = await loadFromCloud();
       if (cloudDb) {
         setDb(cloudDb);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudDb));
+        localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
       }
     }
-    initSync();
-  }, []); // run only once at app start
+    init();
+  }, []);
 
-  // --- Save to local + Supabase whenever db changes ---
+  // 💾 Save changes to localStorage AND Supabase
   useEffect(() => {
-    if (!db) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-    saveToCloud(db); // push latest changes to Supabase
+    localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
+    saveToCloud(db);
   }, [db]);
 
+  // === UI ===
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
-      <h1 className="text-2xl font-bold mb-4">Greg's Lifting Log</h1>
-      <Tabs defaultValue="log">
-        <TabsList>
+      <h1 className="text-3xl font-bold mb-6">Greg&apos;s Lifting Log</h1>
+
+      <Tabs defaultValue="log" className="w-full">
+        <TabsList className="grid grid-cols-4 gap-2 mb-4">
           <TabsTrigger value="log">Log</TabsTrigger>
           <TabsTrigger value="progress">Progress</TabsTrigger>
           <TabsTrigger value="program">Program</TabsTrigger>
@@ -62,6 +63,43 @@ export default function App() {
           <ExercisesTab db={db} setDb={setDb} />
         </TabsContent>
       </Tabs>
+
+      {/* === Backup Export/Import buttons === */}
+      <div className="mt-6 space-x-2">
+        <button
+          onClick={() => {
+            const blob = new Blob([JSON.stringify(db)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "gregs-lifting-log.json";
+            a.click();
+          }}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+        >
+          Export Data
+        </button>
+
+        <input
+          type="file"
+          accept="application/json"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              try {
+                const imported = JSON.parse(event.target.result);
+                setDb(imported);
+              } catch (err) {
+                alert("Invalid file format");
+              }
+            };
+            reader.readAsText(file);
+          }}
+          className="text-white"
+        />
+      </div>
     </div>
   );
 }
