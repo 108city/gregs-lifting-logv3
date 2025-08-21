@@ -1,111 +1,121 @@
 import React, { useState } from "react";
 
 export default function LogTab({ db, setDb }) {
-  const [selectedExercise, setSelectedExercise] = useState("");
-  const [sets, setSets] = useState(3);
-  const [reps, setReps] = useState(10);
+  const [selectedProgram, setSelectedProgram] = useState("");
+  const [weight, setWeight] = useState("");
+  const [notes, setNotes] = useState("");
 
-  // Group exercises by category
-  const grouped = (db.exercises || []).reduce((acc, ex) => {
-    if (!acc[ex.category]) acc[ex.category] = [];
-    acc[ex.category].push(ex);
-    return acc;
-  }, {});
+  const addLog = () => {
+    if (!selectedProgram || !weight.trim()) return;
 
-  const addWorkout = () => {
-    if (!selectedExercise) return;
+    const program = db.programs.find((p) => p.id === selectedProgram);
+    if (!program) return;
 
-    const newWorkout = {
-      id: crypto.randomUUID(),
+    const newLog = {
+      id: Date.now().toString(36) + Math.random().toString(36).substring(2, 9),
+      programId: program.id,
+      exerciseId: program.exerciseId,
       date: new Date().toISOString(),
-      exercise: selectedExercise,
-      sets,
-      reps,
+      weight,
+      notes,
     };
 
-    setDb({
+    const updated = {
       ...db,
-      workouts: [...(db.workouts || []), newWorkout],
-    });
+      log: [...(db.log || []), newLog],
+    };
 
-    setSelectedExercise("");
-    setSets(3);
-    setReps(10);
+    setDb(updated);
+    setSelectedProgram("");
+    setWeight("");
+    setNotes("");
+  };
+
+  const deleteLog = (id) => {
+    const updated = {
+      ...db,
+      log: db.log.filter((l) => l.id !== id),
+    };
+    setDb(updated);
   };
 
   return (
     <div>
-      <h2 className="text-xl font-bold mb-4">Workout Log</h2>
+      <h2 className="text-xl font-semibold mb-4">Workout Log</h2>
 
-      <div className="space-y-3">
-        {/* Exercise Selector with categories */}
-        <div>
-          <label className="block">Exercise:</label>
-          <select
-            value={selectedExercise}
-            onChange={(e) => setSelectedExercise(e.target.value)}
-            className="bg-gray-800 text-white px-2 py-1 rounded w-full"
-          >
-            <option value="">-- Select an exercise --</option>
-            {Object.keys(grouped).map((cat) => (
-              <optgroup key={cat} label={cat}>
-                {grouped[cat].map((ex) => (
-                  <option key={ex.id} value={ex.name}>
-                    {ex.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </div>
+      {/* Add new log */}
+      <div className="space-y-2 mb-6">
+        <select
+          value={selectedProgram}
+          onChange={(e) => setSelectedProgram(e.target.value)}
+          className="px-2 py-1 rounded text-black w-full"
+        >
+          <option value="">Select Program</option>
+          {(db.programs || []).map((p) => {
+            const exercise = db.exercises.find((ex) => ex.id === p.exerciseId);
+            return (
+              <option key={p.id} value={p.id}>
+                {p.name} — {exercise ? exercise.name : "Unknown Exercise"}
+              </option>
+            );
+          })}
+        </select>
 
-        {/* Sets */}
-        <div>
-          <label className="block">Sets:</label>
-          <input
-            type="number"
-            value={sets}
-            onChange={(e) => setSets(Number(e.target.value))}
-            className="bg-gray-800 text-white px-2 py-1 rounded"
-          />
-        </div>
+        <input
+          type="number"
+          placeholder="Weight (kg)"
+          value={weight}
+          onChange={(e) => setWeight(e.target.value)}
+          className="px-2 py-1 rounded text-black w-full"
+        />
 
-        {/* Reps */}
-        <div>
-          <label className="block">Reps:</label>
-          <input
-            type="number"
-            value={reps}
-            onChange={(e) => setReps(Number(e.target.value))}
-            className="bg-gray-800 text-white px-2 py-1 rounded"
-          />
-        </div>
+        <input
+          type="text"
+          placeholder="Notes (optional)"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          className="px-2 py-1 rounded text-black w-full"
+        />
 
         <button
-          onClick={addWorkout}
+          onClick={addLog}
           className="bg-blue-500 text-white px-4 py-2 rounded"
         >
-          Add Workout
+          Add Log
         </button>
       </div>
 
-      {/* Show logged workouts */}
-      <div className="mt-6">
-        <h3 className="text-lg font-semibold mb-2">Workout History</h3>
-        {(db.workouts || []).length === 0 && (
-          <p className="text-gray-400">No workouts logged yet.</p>
-        )}
-        {(db.workouts || []).map((w) => (
-          <div
-            key={w.id}
-            className="flex justify-between items-center bg-gray-800 p-2 rounded mb-2"
-          >
-            <span>
-              {new Date(w.date).toLocaleDateString()} — {w.exercise} ({w.sets}×{w.reps})
-            </span>
-          </div>
-        ))}
-      </div>
+      {/* List of logs */}
+      <ul className="space-y-3">
+        {(db.log || []).map((l) => {
+          const program = db.programs.find((p) => p.id === l.programId);
+          const exercise = db.exercises.find((ex) => ex.id === l.exerciseId);
+          return (
+            <li
+              key={l.id}
+              className="flex justify-between items-center bg-gray-800 px-3 py-2 rounded"
+            >
+              <div>
+                <p className="font-semibold">
+                  {program ? program.name : "Unknown Program"}
+                </p>
+                <p className="text-sm text-gray-400">
+                  {exercise ? exercise.name : "Unknown Exercise"} — {l.weight} kg
+                </p>
+                <p className="text-xs text-gray-500">
+                  {new Date(l.date).toLocaleDateString()} — {l.notes}
+                </p>
+              </div>
+              <button
+                onClick={() => deleteLog(l.id)}
+                className="bg-red-500 text-white px-2 py-1 rounded text-sm"
+              >
+                Delete
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
