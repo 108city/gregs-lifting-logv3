@@ -1,72 +1,85 @@
 import React, { useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from "recharts";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 export default function ProgressTab({ db }) {
-  const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedExercise, setSelectedExercise] = useState(null);
 
-  // Group exercises by category
-  const grouped = (db.exercises || []).reduce((acc, ex) => {
-    if (!acc[ex.category]) acc[ex.category] = [];
-    acc[ex.category].push(ex);
-    return acc;
-  }, {});
+  // === Build trend data (max weight & total volume per workout) ===
+  function buildTrend(exerciseId) {
+    if (!db?.workouts || db.workouts.length === 0) return [];
 
-  // Filter workouts based on selected category
-  const workouts = (db.workouts || []).filter((w) => {
-    if (!selectedCategory) return true;
-    const exercise = (db.exercises || []).find((ex) => ex.name === w.exercise);
-    return exercise?.category === selectedCategory;
-  });
+    return db.workouts.map((workout) => {
+      let max = 0;
+      let totalVolume = 0;
 
-  // Prepare chart data per exercise
-  const exerciseData = {};
-  workouts.forEach((w) => {
-    if (!exerciseData[w.exercise]) exerciseData[w.exercise] = [];
-    exerciseData[w.exercise].push({
-      date: new Date(w.date).toLocaleDateString(),
-      volume: w.sets * w.reps,
-    });
-  });
+      workout.days.forEach((day) => {
+        day.exercises.forEach((ex) => {
+          if (ex.id === exerciseId) {
+            ex.sets.forEach((s) => {
+              const volume = (s.weight || 0) * (s.reps || 0);
+              totalVolume += volume;
+              if (s.weight > max) max = s.weight;
+            });
+          }
+        });
+      });
+
+      return {
+        date: workout.startDate || "Unknown",
+        max,
+        totalVolume,
+      };
+    }).filter((entry) => entry.max > 0 || entry.totalVolume > 0);
+  }
+
+  const exercises = db.exercises || [];
+  const trend = selectedExercise ? buildTrend(selectedExercise) : [];
 
   return (
     <div>
       <h2 className="text-xl font-bold mb-4">Progress</h2>
 
-      {/* Category Selector */}
-      <div className="mb-4">
-        <label className="block">Filter by Category:</label>
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="bg-gray-800 text-white px-2 py-1 rounded"
-        >
-          <option value="">All Categories</option>
-          {Object.keys(grouped).map((cat) => (
-            <option key={cat} value={cat}>
-              {cat}
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* Exercise selector */}
+      <select
+        className="bg-gray-800 text-white p-2 rounded mb-4"
+        value={selectedExercise || ""}
+        onChange={(e) => setSelectedExercise(e.target.value)}
+      >
+        <option value="">-- Select Exercise --</option>
+        {exercises.map((ex) => (
+          <option key={ex.id} value={ex.id}>
+            {ex.name}
+          </option>
+        ))}
+      </select>
 
-      {/* Charts per exercise */}
-      {Object.keys(exerciseData).length === 0 && (
-        <p className="text-gray-400">No data to display.</p>
+      {/* Chart */}
+      {selectedExercise && trend.length > 0 ? (
+        <ResponsiveContainer width="100%" height={400}>
+          <LineChart data={trend}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="date" />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            <Line type="monotone" dataKey="max" stroke="#3b82f6" name="Max Weight (kg)" />
+            <Line type="monotone" dataKey="totalVolume" stroke="#10b981" name="Total Volume (kg)" />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <p className="text-gray-400">
+          {selectedExercise ? "No data for this exercise yet." : "Select an exercise to view progress."}
+        </p>
       )}
-      {Object.entries(exerciseData).map(([exercise, data]) => (
-        <div key={exercise} className="mb-6">
-          <h3 className="text-lg font-semibold mb-2">{exercise}</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="volume" stroke="#3B82F6" strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      ))}
     </div>
   );
 }
