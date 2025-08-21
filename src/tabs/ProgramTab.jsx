@@ -1,5 +1,9 @@
 import React, { useState } from "react";
-import { v4 as uuidv4 } from "uuid";
+
+// simple id generator (no external lib needed)
+function generateId() {
+  return "_" + Math.random().toString(36).substr(2, 9);
+}
 
 export default function ProgramTab({ db, setDb }) {
   const [startDate, setStartDate] = useState(db.program?.startDate || "");
@@ -17,7 +21,7 @@ export default function ProgramTab({ db, setDb }) {
         day.id === dayId
           ? {
               ...day,
-              exercises: [...day.exercises, { id: uuidv4(), exerciseId }],
+              exercises: [...day.exercises, { id: generateId(), exerciseId }],
             }
           : day
       )
