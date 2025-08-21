@@ -1,21 +1,36 @@
 import { supabase } from "./supabaseClient";
 
+// ✅ Ensure DB always has all keys
+function ensureSchema(db) {
+  return {
+    workouts: db?.workouts || [],
+    exercises: db?.exercises || [],
+    progress: db?.progress || [],
+    log: db?.log || [],
+  };
+}
+
 // Save to Supabase
 export async function saveToCloud(db) {
   try {
+    const safeDb = ensureSchema(db);
     const { error } = await supabase
       .from("lifting_logs")
       .upsert(
-        [{ id: "gregs-device", data: db, updated_at: new Date().toISOString() }],
+        [
+          {
+            id: "gregs-device",
+            data: safeDb,
+            updated_at: new Date().toISOString(),
+          },
+        ],
         { onConflict: ["id"] }
       );
 
     if (error) throw error;
     console.log("✅ Saved to Supabase");
-    return true; // success
   } catch (err) {
     console.error("❌ Error saving to Supabase:", err.message);
-    return false; // failure
   }
 }
 
@@ -30,9 +45,9 @@ export async function loadFromCloud() {
 
     if (error) throw error;
     console.log("✅ Loaded from Supabase");
-    return data?.data || null;
+    return ensureSchema(data?.data || {});
   } catch (err) {
     console.error("❌ Error loading from Supabase:", err.message);
-    return null; // fallback
+    return ensureSchema({});
   }
 }
