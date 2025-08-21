@@ -1,24 +1,19 @@
 import React, { useState } from "react";
 
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+const nowIso = () => new Date().toISOString();
+
 export default function ExercisesTab({ db, setDb }) {
   const [newExercise, setNewExercise] = useState("");
 
-  // Generate a pseudo unique ID
-  const generateId = () =>
-    Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
-
-  // Current timestamp
-  const nowIso = () => new Date().toISOString();
-
   const addExercise = () => {
     if (!newExercise.trim()) return;
-
     const updated = {
       ...db,
       exercises: [
         ...db.exercises,
         {
-          id: generateId(),
+          id: genId(),
           name: newExercise.trim(),
           category: "Other",
           updatedAt: nowIso(),
@@ -34,7 +29,7 @@ export default function ExercisesTab({ db, setDb }) {
       ...db,
       exercises: db.exercises
         .filter((ex) => ex.id !== id)
-        .map((ex) => ({ ...ex, updatedAt: nowIso() })), // stamp survivors too
+        .map((ex) => ({ ...ex, updatedAt: nowIso() })),
     };
     setDb(updated);
   };
@@ -51,10 +46,7 @@ export default function ExercisesTab({ db, setDb }) {
           placeholder="Add exercise"
           className="px-2 py-1 rounded text-black"
         />
-        <button
-          onClick={addExercise}
-          className="bg-blue-500 text-white px-3 py-1 rounded"
-        >
+        <button onClick={addExercise} className="bg-blue-500 text-white px-3 py-1 rounded">
           Add
         </button>
       </div>
