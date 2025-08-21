@@ -1,85 +1,71 @@
 import React, { useState } from "react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
 
-export default function ProgressTab({ db }) {
-  const [selectedExercise, setSelectedExercise] = useState(null);
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+const nowIso = () => new Date().toISOString();
 
-  // === Build trend data (max weight & total volume per workout) ===
-  function buildTrend(exerciseId) {
-    if (!db?.workouts || db.workouts.length === 0) return [];
+export default function ProgressTab({ db, setDb }) {
+  const [weight, setWeight] = useState("");
 
-    return db.workouts.map((workout) => {
-      let max = 0;
-      let totalVolume = 0;
+  const addProgress = () => {
+    if (!weight) return;
+    const updated = {
+      ...db,
+      progress: [
+        ...db.progress,
+        {
+          id: genId(),
+          weight: parseFloat(weight),
+          date: nowIso(),
+          updatedAt: nowIso(),
+        },
+      ],
+    };
+    setDb(updated);
+    setWeight("");
+  };
 
-      workout.days.forEach((day) => {
-        day.exercises.forEach((ex) => {
-          if (ex.id === exerciseId) {
-            ex.sets.forEach((s) => {
-              const volume = (s.weight || 0) * (s.reps || 0);
-              totalVolume += volume;
-              if (s.weight > max) max = s.weight;
-            });
-          }
-        });
-      });
-
-      return {
-        date: workout.startDate || "Unknown",
-        max,
-        totalVolume,
-      };
-    }).filter((entry) => entry.max > 0 || entry.totalVolume > 0);
-  }
-
-  const exercises = db.exercises || [];
-  const trend = selectedExercise ? buildTrend(selectedExercise) : [];
+  const deleteProgress = (id) => {
+    setDb({
+      ...db,
+      progress: db.progress.filter((p) => p.id !== id),
+    });
+  };
 
   return (
     <div>
-      <h2 className="text-xl font-bold mb-4">Progress</h2>
+      <h2 className="text-xl font-semibold mb-4">Progress</h2>
 
-      {/* Exercise selector */}
-      <select
-        className="bg-gray-800 text-white p-2 rounded mb-4"
-        value={selectedExercise || ""}
-        onChange={(e) => setSelectedExercise(e.target.value)}
-      >
-        <option value="">-- Select Exercise --</option>
-        {exercises.map((ex) => (
-          <option key={ex.id} value={ex.id}>
-            {ex.name}
-          </option>
+      <div className="flex space-x-2 mb-4">
+        <input
+          type="number"
+          value={weight}
+          onChange={(e) => setWeight(e.target.value)}
+          placeholder="Enter weight"
+          className="px-2 py-1 rounded text-black"
+        />
+        <button onClick={addProgress} className="bg-blue-500 text-white px-3 py-1 rounded">
+          Add
+        </button>
+      </div>
+
+      <ul className="space-y-2">
+        {db.progress.map((p) => (
+          <li
+            key={p.id}
+            className="flex justify-between items-center bg-gray-800 px-3 py-2 rounded"
+          >
+            <span>
+              {p.date?.slice(0, 10)} — {p.weight} kg
+            </span>
+            <button
+              onClick={() => deleteProgress(p.id)}
+              className="bg-red-500 text-white px-2 py-1 rounded text-sm"
+            >
+              Delete
+            </button>
+          </li>
         ))}
-      </select>
-
-      {/* Chart */}
-      {selectedExercise && trend.length > 0 ? (
-        <ResponsiveContainer width="100%" height={400}>
-          <LineChart data={trend}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Line type="monotone" dataKey="max" stroke="#3b82f6" name="Max Weight (kg)" />
-            <Line type="monotone" dataKey="totalVolume" stroke="#10b981" name="Total Volume (kg)" />
-          </LineChart>
-        </ResponsiveContainer>
-      ) : (
-        <p className="text-gray-400">
-          {selectedExercise ? "No data for this exercise yet." : "Select an exercise to view progress."}
-        </p>
-      )}
+      </ul>
     </div>
   );
 }
