@@ -33,6 +33,7 @@ export default function ProgramTab({ db, setDb }) {
   );
 
   const savedPrograms = db.programs || [];
+  const activeProgramId = db.activeProgramId || null;
 
   // ---------- builder mutators ----------
   const addDay = () => {
@@ -132,14 +133,29 @@ export default function ProgramTab({ db, setDb }) {
     resetDraft();
   };
 
-  // ---------- saved programs mutators (edit/delete) ----------
+  // ---------- saved programs mutators (edit/delete/activate) ----------
   const touchProgram = (p) => ({ ...p, updatedAt: nowIso() });
 
-  const deleteSavedProgram = (programId) => {
-    if (!confirm("Delete this program? This cannot be undone.")) return;
+  const setActiveProgram = (programId) => {
     setDb({
       ...db,
-      programs: (db.programs || []).filter((p) => p.id !== programId),
+      activeProgramId: programId,
+    });
+  };
+
+  const deleteSavedProgram = (programId) => {
+    // If you want to remove the confirm, just delete the next 2 lines
+    const ok = confirm("Delete this program? This cannot be undone.");
+    if (!ok) return;
+
+    const remaining = (db.programs || []).filter((p) => p.id !== programId);
+    const nextActive =
+      db.activeProgramId === programId ? (remaining[0]?.id ?? null) : db.activeProgramId;
+
+    setDb({
+      ...db,
+      programs: remaining,
+      activeProgramId: nextActive,
     });
   };
 
@@ -405,86 +421,103 @@ export default function ProgramTab({ db, setDb }) {
           <div className="text-sm text-zinc-400">No programs yet.</div>
         )}
 
-        {savedPrograms.map((p) => (
-          <div key={p.id} className="rounded border border-zinc-700 p-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-semibold text-zinc-100">{p.name}</div>
-                <div className="text-xs text-zinc-400">
-                  Start: {p.startDate || "—"} · Week {weeksBetween(p.startDate) + 1}
+        {savedPrograms.map((p) => {
+          const isActive = p.id === activeProgramId;
+          return (
+            <div key={p.id} className="rounded border border-zinc-700 p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-zinc-100 flex items-center gap-2">
+                    {p.name}
+                    {isActive && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-green-600 text-white">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-zinc-400">
+                    Start: {p.startDate || "—"} · Week {weeksBetween(p.startDate) + 1}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {!isActive && (
+                    <button
+                      onClick={() => setActiveProgram(p.id)}
+                      className="px-3 py-2 rounded bg-blue-600 text-white"
+                      title="Set this as your active program"
+                    >
+                      Set Active
+                    </button>
+                  )}
+                  <button
+                    onClick={() => addDayToSavedProgram(p.id)}
+                    className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
+                    title="Add a new training day"
+                  >
+                    + Add Day
+                  </button>
+                  <button
+                    onClick={() => deleteSavedProgram(p.id)}
+                    className="px-3 py-2 rounded bg-red-600 text-white"
+                    title="Delete this program"
+                  >
+                    Delete Program
+                  </button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => addDayToSavedProgram(p.id)}
-                  className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
-                  title="Add a new training day"
-                >
-                  + Add Day
-                </button>
-                <button
-                  onClick={() => deleteSavedProgram(p.id)}
-                  className="px-3 py-2 rounded bg-red-600 text-white"
-                >
-                  Delete Program
-                </button>
-              </div>
-            </div>
 
-            {/* Days inside saved program */}
-            <div className="space-y-2">
-              {p.days.map((d) => (
-                <div key={d.id} className="rounded border border-zinc-700 p-2 space-y-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
-                    <input
-                      value={d.name}
-                      onChange={(e) => renameSavedDay(p.id, d.id, e.target.value)}
-                      className="flex-1 p-2 rounded bg-zinc-900 text-zinc-100"
-                    />
-                    <div className="flex gap-2">
-                      <select
-                        defaultValue=""
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v) {
-                            addExerciseToSavedDay(p.id, d.id, v);
-                            e.target.value = "";
-                          }
-                        }}
-                        className="p-2 rounded bg-zinc-900 text-zinc-100"
-                      >
-                        <option value="" disabled>
-                          + Add exercise
-                        </option>
-                        {exercisesSorted.map((ex) => (
-                          <option key={ex.id} value={ex.id}>
-                            {ex.name}
+              {/* Days inside saved program */}
+              <div className="space-y-2">
+                {p.days.map((d) => (
+                  <div key={d.id} className="rounded border border-zinc-700 p-2 space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                      <input
+                        value={d.name}
+                        onChange={(e) => renameSavedDay(p.id, d.id, e.target.value)}
+                        className="flex-1 p-2 rounded bg-zinc-900 text-zinc-100"
+                      />
+                      <div className="flex gap-2">
+                        <select
+                          defaultValue=""
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v) {
+                              addExerciseToSavedDay(p.id, d.id, v);
+                              e.target.value = "";
+                            }
+                          }}
+                          className="p-2 rounded bg-zinc-900 text-zinc-100"
+                        >
+                          <option value="" disabled>
+                            + Add exercise
                           </option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => deleteSavedDay(p.id, d.id)}
-                        className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
-                      >
-                        Delete Day
-                      </button>
+                          {exercisesSorted.map((ex) => (
+                            <option key={ex.id} value={ex.id}>
+                              {ex.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => deleteSavedDay(p.id, d.id)}
+                          className="px-3 py-2 rounded bg-zinc-800 text-zinc-200"
+                        >
+                          Delete Day
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Items */}
-                  <div className="space-y-1 text-sm">
-                    {d.items.length === 0 && (
-                      <div className="text-zinc-400">No exercises.</div>
-                    )}
-                    {d.items.map((it, idx) => {
-                      const ex = (db.exercises || []).find((e) => e.id === it.exerciseId);
-                      return (
+                    {/* Items */}
+                    <div className="space-y-1 text-sm">
+                      {d.items.length === 0 && (
+                        <div className="text-zinc-400">No exercises.</div>
+                      )}
+                      {d.items.map((it, idx) => (
                         <div
                           key={it.id}
                           className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center bg-zinc-900 rounded px-2 py-2"
                         >
                           <div className="sm:col-span-2">
-                            {idx + 1}. {ex?.name || "(deleted exercise)"}
+                            {idx + 1}. {(db.exercises || []).find(e => e.id === it.exerciseId)?.name || "(deleted exercise)"}
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-zinc-300">Sets</span>
@@ -519,14 +552,14 @@ export default function ProgramTab({ db, setDb }) {
                             </button>
                           </div>
                         </div>
-                      );
-                    })}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
