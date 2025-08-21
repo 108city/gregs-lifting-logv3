@@ -12,8 +12,10 @@ export async function saveToCloud(db) {
 
     if (error) throw error;
     console.log("✅ Saved to Supabase");
+    return true; // success
   } catch (err) {
     console.error("❌ Error saving to Supabase:", err.message);
+    return false; // failure
   }
 }
 
@@ -31,6 +33,6 @@ export async function loadFromCloud() {
     return data?.data || null;
   } catch (err) {
     console.error("❌ Error loading from Supabase:", err.message);
-    return null;
+    return null; // fallback
   }
 }
