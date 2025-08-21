@@ -3,9 +3,12 @@ import React, { useState } from "react";
 export default function ExercisesTab({ db, setDb }) {
   const [newExercise, setNewExercise] = useState("");
 
-  // Helper: generate a unique ID without uuid
+  // Generate a pseudo unique ID
   const generateId = () =>
     Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+
+  // Current timestamp
+  const nowIso = () => new Date().toISOString();
 
   const addExercise = () => {
     if (!newExercise.trim()) return;
@@ -14,7 +17,12 @@ export default function ExercisesTab({ db, setDb }) {
       ...db,
       exercises: [
         ...db.exercises,
-        { id: generateId(), name: newExercise, category: "Other" },
+        {
+          id: generateId(),
+          name: newExercise.trim(),
+          category: "Other",
+          updatedAt: nowIso(),
+        },
       ],
     };
     setDb(updated);
@@ -24,7 +32,9 @@ export default function ExercisesTab({ db, setDb }) {
   const deleteExercise = (id) => {
     const updated = {
       ...db,
-      exercises: db.exercises.filter((ex) => ex.id !== id),
+      exercises: db.exercises
+        .filter((ex) => ex.id !== id)
+        .map((ex) => ({ ...ex, updatedAt: nowIso() })), // stamp survivors too
     };
     setDb(updated);
   };
