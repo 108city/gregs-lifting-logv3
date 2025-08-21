@@ -1,11 +1,15 @@
 import { supabase } from "./supabaseClient";
 
-// Save the full DB snapshot to Supabase under the single row "gregs-log"
+// Save to Supabase
 export async function saveToCloud(db) {
   try {
     const { error } = await supabase
       .from("lifting_logs")
-      .upsert([{ id: "gregs-log", data: db }], { onConflict: ["id"] });
+      .upsert(
+        [{ id: "gregs-device", data: db, updated_at: new Date().toISOString() }],
+        { onConflict: ["id"] }
+      );
+
     if (error) throw error;
     console.log("✅ Saved to Supabase");
   } catch (err) {
@@ -13,15 +17,16 @@ export async function saveToCloud(db) {
   }
 }
 
-// Load the DB snapshot back from Supabase
+// Load from Supabase
 export async function loadFromCloud() {
   try {
     const { data, error } = await supabase
       .from("lifting_logs")
       .select("data")
-      .eq("id", "gregs-log")
+      .eq("id", "gregs-device")
       .single();
-    if (error && error.code !== "PGRST116") throw error;
+
+    if (error) throw error;
     console.log("✅ Loaded from Supabase");
     return data?.data || null;
   } catch (err) {
