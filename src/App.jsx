@@ -55,19 +55,17 @@ export default function App() {
     init();
   }, []);
 
-  // 💾 Save changes to localStorage AND Supabase (safe version)
+  // 💾 Save changes with safety fallback
   useEffect(() => {
-    localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
-
-    async function sync() {
-      const success = await saveToCloud(db);
-      if (!success) {
-        console.warn("⚠️ Cloud sync failed — keeping data in localStorage.");
-        // Optional retry after 10 seconds
-        setTimeout(() => saveToCloud(db), 10000);
+    async function persist() {
+      try {
+        localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
+        await saveToCloud(db);
+      } catch (err) {
+        console.error("❌ Cloud save failed, keeping local copy only:", err.message);
       }
     }
-    sync();
+    persist();
   }, [db]);
 
   // === UI ===
@@ -105,42 +103,4 @@ export default function App() {
         </TabsContent>
       </Tabs>
 
-      {/* === Backup Export/Import buttons === */}
-      <div className="mt-6 space-x-2">
-        <button
-          onClick={() => {
-            const blob = new Blob([JSON.stringify(db)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "gregs-lifting-log.json";
-            a.click();
-          }}
-          className="bg-blue-500 text-white px-4 py-2 rounded"
-        >
-          Export Data
-        </button>
-
-        <input
-          type="file"
-          accept="application/json"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              try {
-                const imported = JSON.parse(event.target.result);
-                setDb(imported);
-              } catch (err) {
-                alert("Invalid file format");
-              }
-            };
-            reader.readAsText(file);
-          }}
-          className="text-white"
-        />
-      </div>
-    </div>
-  );
-}
+      {/
