@@ -1,116 +1,157 @@
+// src/App.jsx
 import React, { useEffect, useState } from "react";
-import { sync, saveLocalEdit } from "./syncService";
+import { pullPreferNewer, saveToCloud } from "./syncService";
 
-// Import tabs
+// Tabs (your simple versions)
+import Tabs, { TabsList, TabsTrigger, TabsContent } from "./Tabs";
+
+// Tab screens
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
 
-// === Simple Tabs Implementation ===
-function Tabs({ children }) {
-  return <div>{children}</div>;
-}
-function TabsList({ children }) {
-  return <div className="flex space-x-2 mb-4">{children}</div>;
-}
-function TabsTrigger({ value, activeTab, setActiveTab, children }) {
-  return (
-    <button
-      onClick={() => setActiveTab(value)}
-      className={`px-3 py-1 rounded ${
-        activeTab === value
-          ? "bg-blue-500 text-white"
-          : "bg-gray-700 text-gray-300"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-function TabsContent({ value, activeTab, children }) {
-  return activeTab === value ? <div>{children}</div> : null;
-}
+const LS_KEY = "gregs-lifting-log";
+
+const initialDb = () => {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  // default shape
+  return {
+    exercises: [],
+    programs: [],
+    log: [],
+    progress: [],
+    _meta: { localUpdatedAt: null },
+  };
+};
 
 export default function App() {
-  // === State management ===
-  const [db, setDb] = useState(() => {
-    try {
-      const local = localStorage.getItem("gregs-lifting-log");
-      return local
-        ? JSON.parse(local)
-        : { workouts: [], exercises: [], programs: [], log: [], progress: [] };
-    } catch {
-      return { workouts: [], exercises: [], programs: [], log: [], progress: [] };
-    }
-  });
-
+  const [db, setDb] = useState(initialDb);
   const [activeTab, setActiveTab] = useState("log");
+  const [cloudState, setCloudState] = useState("idle"); // idle | pulling | pushing | error
 
-  // 🔄 Sync with Supabase on app start
+  // ---- On mount: pull from cloud if newer ----
   useEffect(() => {
-    async function init() {
+    let cancelled = false;
+    (async () => {
       try {
-        const merged = await sync(db);
-        if (merged) {
+        setCloudState("pulling");
+        const merged = await pullPreferNewer(db);
+        if (!cancelled) {
           setDb(merged);
-          localStorage.setItem("gregs-lifting-log", JSON.stringify(merged));
+          localStorage.setItem(LS_KEY, JSON.stringify(merged));
+          setCloudState("idle");
+          console.log("🔄 Cloud pull complete.");
         }
       } catch (err) {
-        console.error("Cloud sync failed on init:", err.message);
+        console.warn("Cloud pull failed (using local):", err?.message);
+        if (!cancelled) setCloudState("error");
       }
-    }
-    init();
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // mount only
 
-  // 💾 Save changes locally + cloud
+  // ---- On any local change: save to localStorage + push to cloud ----
   useEffect(() => {
-    async function persist() {
-      try {
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
-        await sync(db);
-      } catch (err) {
-        console.error("❌ Sync failed, saved local only:", err.message);
-      }
-    }
-    persist();
-  }, [db]);
+    // Stamp local update time (used for conflict direction)
+    const stamped = { ...db, _meta: { ...db._meta, localUpdatedAt: new Date().toISOString() } };
+    localStorage.setItem(LS_KEY, JSON.stringify(stamped));
 
-  // === UI ===
+    let cancelled = false;
+    (async () => {
+      try {
+        setCloudState("pushing");
+        await saveToCloud(stamped);
+        if (!cancelled) setCloudState("idle");
+        console.log("☁️ Pushed to cloud.");
+      } catch (err) {
+        console.error("❌ Cloud push failed (kept local):", err?.message);
+        if (!cancelled) setCloudState("error");
+      }
+    })();
+
+    // keep in memory too (so state reflects the stamped time)
+    setDb(stamped);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [db?.exercises, db?.programs, db?.log, db?.progress]); // push only when real data changes
+
+  // ---- Optional: manual import for recovery/testing ----
+  const onImport = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const incoming = JSON.parse(text);
+      // overwrite everything with imported snapshot
+      const next = {
+        exercises: Array.isArray(incoming.exercises) ? incoming.exercises : [],
+        programs: Array.isArray(incoming.programs) ? incoming.programs : [],
+        log: Array.isArray(incoming.log) ? incoming.log : [],
+        progress: Array.isArray(incoming.progress) ? incoming.progress : [],
+        _meta: { localUpdatedAt: new Date().toISOString() },
+      };
+      setDb(next); // rest handled by effect (localStorage + cloud push)
+    } catch (e) {
+      alert("Invalid JSON file.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
-      <h1 className="text-3xl font-bold mb-6">Greg&apos;s Lifting Log</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">Greg&apos;s Lifting Log</h1>
+        <div className="text-xs text-zinc-400">
+          Cloud:{" "}
+          {cloudState === "idle" && <span>✅ idle</span>}
+          {cloudState === "pulling" && <span>⭮ pulling…</span>}
+          {cloudState === "pushing" && <span>⇧ pushing…</span>}
+          {cloudState === "error" && <span>⚠️ offline</span>}
+        </div>
+      </div>
 
-      <Tabs>
-        <TabsList>
-          <TabsTrigger value="log" activeTab={activeTab} setActiveTab={setActiveTab}>
-            Log
-          </TabsTrigger>
-          <TabsTrigger value="progress" activeTab={activeTab} setActiveTab={setActiveTab}>
-            Progress
-          </TabsTrigger>
-          <TabsTrigger value="program" activeTab={activeTab} setActiveTab={setActiveTab}>
-            Program
-          </TabsTrigger>
-          <TabsTrigger value="exercises" activeTab={activeTab} setActiveTab={setActiveTab}>
-            Exercises
-          </TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="log">Log</TabsTrigger>
+          <TabsTrigger value="progress">Progress</TabsTrigger>
+          <TabsTrigger value="programs">Programs</TabsTrigger>
+          <TabsTrigger value="exercises">Exercises</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="log" activeTab={activeTab}>
+        <TabsContent value="log">
           <LogTab db={db} setDb={setDb} />
         </TabsContent>
-        <TabsContent value="progress" activeTab={activeTab}>
+
+        <TabsContent value="progress">
           <ProgressTab db={db} />
         </TabsContent>
-        <TabsContent value="program" activeTab={activeTab}>
+
+        <TabsContent value="programs">
           <ProgramTab db={db} setDb={setDb} />
         </TabsContent>
-        <TabsContent value="exercises" activeTab={activeTab}>
+
+        <TabsContent value="exercises">
           <ExercisesTab db={db} setDb={setDb} />
         </TabsContent>
       </Tabs>
+
+      {/* Optional: Import (keep while testing) */}
+      <div className="mt-6">
+        <label className="text-sm text-zinc-400 block mb-1">Import Data (JSON)</label>
+        <input
+          type="file"
+          accept="application/json"
+          onChange={(e) => onImport(e.target.files?.[0])}
+          className="text-zinc-200"
+        />
+      </div>
     </div>
   );
 }
