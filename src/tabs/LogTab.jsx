@@ -1,122 +1,125 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { saveLocalEdit } from "../syncService";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-function titleCase(s) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 export default function LogTab({ db, setDb }) {
   const activeProgram = (db.programs || []).find((p) => p.active);
-  const [selectedDayId, setSelectedDayId] = useState(null);
   const [date, setDate] = useState(todayIso());
+  const [dayId, setDayId] = useState("");
 
   useEffect(() => {
-    if (activeProgram && !selectedDayId && activeProgram.days.length > 0) {
-      setSelectedDayId(activeProgram.days[0].id);
+    if (activeProgram && activeProgram.days.length > 0 && !dayId) {
+      setDayId(activeProgram.days[0].id);
     }
-  }, [activeProgram, selectedDayId]);
+  }, [activeProgram, dayId]);
 
-  if (!activeProgram) {
-    return (
-      <div className="text-sm text-zinc-400">
-        No active workout. Go to Program tab and set one active.
-      </div>
-    );
-  }
+  const selectedDay = activeProgram?.days.find((d) => d.id === dayId);
 
-  const day = activeProgram.days.find((d) => d.id === selectedDayId);
-
-  // Find last session for this program/day
+  // Find last session for this program + day
   const lastSession = useMemo(() => {
     return (db.log || [])
-      .filter((s) => s.programId === activeProgram.id && s.dayId === selectedDayId)
+      .filter((s) => s.programId === activeProgram?.id && s.dayId === dayId)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
-  }, [db.log, activeProgram, selectedDayId]);
+  }, [db.log, activeProgram, dayId]);
 
   const [entries, setEntries] = useState([]);
 
-  // Prefill from last session or program template
+  // Seed entries when switching program/day
   useEffect(() => {
-    if (!day) return;
-    if (lastSession) {
-      setEntries(
-        lastSession.entries.map((e) => ({
-          ...e,
-          reps: e.reps || "",
-          weight: e.weight || "",
-          rating: e.rating || null,
-        }))
-      );
-    } else {
-      setEntries(
-        day.items.map((it) => ({
-          id: it.id,
-          exerciseId: it.exerciseId,
-          name: it.name,
-          reps: "",
-          weight: "",
-          rating: null,
-        }))
-      );
-    }
-  }, [day, lastSession]);
+    if (!selectedDay) return;
+    const newEntries = selectedDay.items.map((it) => {
+      const prevEntry = lastSession?.entries.find((e) => e.itemId === it.id);
+      return {
+        itemId: it.id,
+        exerciseId: it.exerciseId,
+        name: it.name,
+        sets: Array.from({ length: it.sets }, (_, i) => {
+          const prev = prevEntry?.sets[i];
+          return {
+            reps: prev ? prev.reps : it.reps,
+            weight: prev ? prev.weight : "",
+          };
+        }),
+        rating: prevEntry?.rating || null,
+      };
+    });
+    setEntries(newEntries);
+  }, [selectedDay, lastSession]);
 
-  const updateEntry = (id, field, value) => {
+  const updateSet = (itemId, setIndex, field, value) => {
     setEntries((ents) =>
-      ents.map((e) => (e.id === id ? { ...e, [field]: value } : e))
+      ents.map((e) =>
+        e.itemId !== itemId
+          ? e
+          : {
+              ...e,
+              sets: e.sets.map((s, i) =>
+                i === setIndex ? { ...s, [field]: value } : s
+              ),
+            }
+      )
     );
   };
 
-  const saveLog = async () => {
+  const setRating = (itemId, rating) => {
+    setEntries((ents) =>
+      ents.map((e) =>
+        e.itemId !== itemId ? e : { ...e, rating: e.rating === rating ? null : rating }
+      )
+    );
+  };
+
+  const saveLog = () => {
+    if (!activeProgram || !selectedDay) return;
     const newLog = {
       id: Date.now().toString(),
       programId: activeProgram.id,
-      dayId: selectedDayId,
+      dayId: selectedDay.id,
       date,
       entries,
     };
-
-    const updated = await saveLocalEdit(db, (draft) => {
-      draft.log.push(newLog);
+    setDb({
+      ...db,
+      log: [...(db.log || []).filter((s) => !(s.date === date && s.dayId === dayId)), newLog],
     });
-    setDb(updated);
-    alert("✅ Workout saved");
+    alert("Workout saved ✅");
   };
+
+  if (!activeProgram) {
+    return <p className="text-sm text-zinc-400">No active workout. Set one in Program tab.</p>;
+  }
 
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold">{activeProgram.name}</h2>
-        <div className="text-sm text-zinc-400">
+        <p className="text-sm text-zinc-400">
           Started {activeProgram.startDate} · Week{" "}
           {Math.floor(
-            (new Date(date) - new Date(activeProgram.startDate)) /
-              (1000 * 60 * 60 * 24 * 7)
+            (new Date(date) - new Date(activeProgram.startDate)) / (1000 * 60 * 60 * 24 * 7)
           ) + 1}
-        </div>
+        </p>
       </div>
 
-      <div className="flex gap-2 items-center">
-        <label>Date:</label>
+      <div className="flex gap-3 items-center">
+        <label className="text-sm">Date</label>
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="bg-zinc-900 text-white rounded p-1"
+          className="p-2 rounded bg-zinc-900 text-zinc-100"
         />
       </div>
 
-      <div className="flex gap-2 items-center">
-        <label>Day:</label>
+      <div className="flex gap-3 items-center">
+        <label className="text-sm">Day</label>
         <select
-          value={selectedDayId || ""}
-          onChange={(e) => setSelectedDayId(e.target.value)}
-          className="bg-zinc-900 text-white rounded p-1"
+          value={dayId}
+          onChange={(e) => setDayId(e.target.value)}
+          className="p-2 rounded bg-zinc-900 text-zinc-100"
         >
-          {(activeProgram.days || []).map((d) => (
+          {activeProgram.days.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
             </option>
@@ -124,29 +127,17 @@ export default function LogTab({ db, setDb }) {
         </select>
       </div>
 
-      {!day ? (
-        <div className="text-sm text-zinc-400">
-          No exercises for this day. Add some in Program tab.
-        </div>
+      {!selectedDay ? (
+        <p className="text-sm text-zinc-400">No day selected.</p>
       ) : (
         <div className="space-y-4">
           {entries.map((entry) => {
-            const prevEntry = lastSession?.entries.find(
-              (e) => e.id === entry.id
-            );
+            const prevEntry = lastSession?.entries.find((e) => e.itemId === entry.itemId);
             return (
-              <div
-                key={entry.id}
-                className="rounded border border-zinc-700 p-3 space-y-2"
-              >
+              <div key={entry.itemId} className="rounded border border-zinc-700 p-3 space-y-2">
                 <div className="flex justify-between items-center">
                   <div>
                     <div className="font-medium">{entry.name}</div>
-                    <div className="text-xs text-zinc-400">
-                      Target:{" "}
-                      {day.items.find((it) => it.id === entry.id)?.sets || 0} ×{" "}
-                      {day.items.find((it) => it.id === entry.id)?.reps || 0}
-                    </div>
                     {prevEntry && (
                       <div className="text-xs text-zinc-500 mt-1">
                         Last rating:{" "}
@@ -156,13 +147,14 @@ export default function LogTab({ db, setDb }) {
                               prevEntry.rating === "easy"
                                 ? "text-green-500"
                                 : prevEntry.rating === "moderate"
-                                ? "text-amber-400"
+                                ? "text-orange-400"
                                 : prevEntry.rating === "hard"
                                 ? "text-red-500"
                                 : "text-white"
                             }
                           >
-                            {titleCase(prevEntry.rating)}
+                            {prevEntry.rating.charAt(0).toUpperCase() +
+                              prevEntry.rating.slice(1)}
                           </span>
                         ) : (
                           <span className="text-white">—</span>
@@ -170,57 +162,60 @@ export default function LogTab({ db, setDb }) {
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-1">
-                    {["easy", "moderate", "hard"].map((r) => (
-                      <button
-                        key={r}
-                        onClick={() => updateEntry(entry.id, "rating", r)}
-                        className={`px-2 py-1 rounded text-xs ${
-                          entry.rating === r
-                            ? r === "easy"
-                              ? "bg-green-600 text-white"
-                              : r === "moderate"
-                              ? "bg-amber-400 text-black"
-                              : "bg-red-600 text-white"
-                            : "bg-zinc-800 text-zinc-200"
-                        }`}
-                      >
-                        {titleCase(r)}
-                      </button>
-                    ))}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setRating(entry.itemId, "easy")}
+                      className={`px-2 py-1 rounded ${
+                        entry.rating === "easy" ? "bg-green-600" : "bg-zinc-800"
+                      }`}
+                    >
+                      Easy
+                    </button>
+                    <button
+                      onClick={() => setRating(entry.itemId, "moderate")}
+                      className={`px-2 py-1 rounded ${
+                        entry.rating === "moderate" ? "bg-orange-500" : "bg-zinc-800"
+                      }`}
+                    >
+                      Moderate
+                    </button>
+                    <button
+                      onClick={() => setRating(entry.itemId, "hard")}
+                      className={`px-2 py-1 rounded ${
+                        entry.rating === "hard" ? "bg-red-600" : "bg-zinc-800"
+                      }`}
+                    >
+                      Hard
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex gap-2 items-center">
-                  <input
-                    type="number"
-                    placeholder="Reps"
-                    value={entry.reps}
-                    onChange={(e) =>
-                      updateEntry(entry.id, "reps", e.target.value)
-                    }
-                    className="w-20 p-1 rounded bg-zinc-900 text-white"
-                  />
-                  <input
-                    type="number"
-                    placeholder="Weight (kg)"
-                    value={entry.weight}
-                    onChange={(e) =>
-                      updateEntry(entry.id, "weight", e.target.value)
-                    }
-                    className="w-28 p-1 rounded bg-zinc-900 text-white"
-                  />
-                </div>
+                {entry.sets.map((s, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <span className="text-sm text-zinc-400">Set {idx + 1}</span>
+                    <input
+                      type="number"
+                      value={s.reps}
+                      onChange={(e) => updateSet(entry.itemId, idx, "reps", e.target.value)}
+                      className="w-20 p-1 rounded bg-zinc-900 text-zinc-100"
+                      placeholder="Reps"
+                    />
+                    <input
+                      type="number"
+                      value={s.weight}
+                      onChange={(e) => updateSet(entry.itemId, idx, "weight", e.target.value)}
+                      className="w-24 p-1 rounded bg-zinc-900 text-zinc-100"
+                      placeholder="Weight"
+                    />
+                  </div>
+                ))}
               </div>
             );
           })}
         </div>
       )}
 
-      <button
-        onClick={saveLog}
-        className="px-4 py-2 rounded bg-blue-600 text-white"
-      >
+      <button onClick={saveLog} className="px-4 py-2 rounded bg-blue-600 text-white">
         Save Workout
       </button>
     </div>
