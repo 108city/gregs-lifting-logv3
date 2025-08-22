@@ -266,7 +266,7 @@ export default function LogTab({ db, setDb }) {
 
                         {/* Reps input (clearly labeled) */}
                         <div className="flex flex-col gap-1">
-                          <span className="text-xs text-zinc-400">Reps (first)</span>
+                          <span className="text-xs text-zinc-400">Reps</span>
                           <input
                             type="number"
                             inputMode="numeric"
@@ -281,7 +281,7 @@ export default function LogTab({ db, setDb }) {
 
                         {/* Weight input (clearly labeled) */}
                         <div className="flex flex-col gap-1">
-                          <span className="text-xs text-zinc-400">Weight (kg) (second)</span>
+                          <span className="text-xs text-zinc-400">Weight (kg)</span>
                           <input
                             type="number"
                             inputMode="decimal"
