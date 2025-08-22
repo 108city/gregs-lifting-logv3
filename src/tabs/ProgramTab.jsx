@@ -43,7 +43,7 @@ export default function ProgramTab({ db, setDb }) {
     setDays((d) => d.filter((day) => day.id !== dayId));
   };
 
-  const addExerciseToDay = (dayId, exerciseId) => {
+  const addExerciseToDraftDay = (dayId, exerciseId) => {
     if (!exerciseId) return;
     const ex = (db.exercises || []).find((e) => e.id === exerciseId);
     if (!ex) return;
@@ -62,7 +62,7 @@ export default function ProgramTab({ db, setDb }) {
     );
   };
 
-  const updateItemField = (dayId, itemId, field, value) => {
+  const updateDraftItemField = (dayId, itemId, field, value) => {
     setDays((d) =>
       d.map((day) =>
         day.id === dayId
@@ -85,16 +85,7 @@ export default function ProgramTab({ db, setDb }) {
     );
   };
 
-  const deleteItem = (dayId, itemId) => {
-    setDays((d) =>
-      d.map((day) =>
-        day.id === dayId ? { ...day, items: day.items.filter((it) => it.id !== itemId) } : day
-      )
-    );
-  };
-
-  // NEW: move an exercise up/down inside a day
-  const moveItem = (dayId, itemId, direction) => {
+  const moveDraftItem = (dayId, itemId, direction) => {
     setDays((d) =>
       d.map((day) => {
         if (day.id !== dayId) return day;
@@ -108,6 +99,14 @@ export default function ProgramTab({ db, setDb }) {
         next[swapWith] = tmp;
         return { ...day, items: next };
       })
+    );
+  };
+
+  const deleteDraftItem = (dayId, itemId) => {
+    setDays((d) =>
+      d.map((day) =>
+        day.id === dayId ? { ...day, items: day.items.filter((it) => it.id !== itemId) } : day
+      )
     );
   };
 
@@ -183,6 +182,93 @@ export default function ProgramTab({ db, setDb }) {
     });
   };
 
+  const addExerciseToSavedDay = (programId, dayId, exerciseId) => {
+    const ex = (db.exercises || []).find((e) => e.id === exerciseId);
+    if (!ex) return;
+    setDb({
+      ...db,
+      programs: (db.programs || []).map((p) =>
+        p.id !== programId
+          ? p
+          : {
+              ...p,
+              days: p.days.map((d) =>
+                d.id !== dayId
+                  ? d
+                  : {
+                      ...d,
+                      items: [
+                        ...d.items,
+                        { id: genId(), exerciseId: ex.id, name: ex.name, sets: 3, reps: 10 },
+                      ],
+                    }
+              ),
+              updatedAt: new Date().toISOString(),
+            }
+      ),
+    });
+  };
+
+  const updateSavedItemField = (programId, dayId, itemId, field, value) => {
+    setDb({
+      ...db,
+      programs: (db.programs || []).map((p) =>
+        p.id !== programId
+          ? p
+          : {
+              ...p,
+              days: p.days.map((d) =>
+                d.id !== dayId
+                  ? d
+                  : {
+                      ...d,
+                      items: d.items.map((it) =>
+                        it.id !== itemId
+                          ? it
+                          : {
+                              ...it,
+                              [field]:
+                                field === "sets" || field === "reps"
+                                  ? Math.max(
+                                      1,
+                                      Math.min(1000, parseInt(value || "0", 10) || 1)
+                                    )
+                                  : value,
+                            }
+                      ),
+                    }
+              ),
+              updatedAt: new Date().toISOString(),
+            }
+      ),
+    });
+  };
+
+  const moveSavedItem = (programId, dayId, itemId, direction) => {
+    setDb({
+      ...db,
+      programs: (db.programs || []).map((p) => {
+        if (p.id !== programId) return p;
+        return {
+          ...p,
+          days: p.days.map((d) => {
+            if (d.id !== dayId) return d;
+            const idx = d.items.findIndex((it) => it.id === itemId);
+            if (idx < 0) return d;
+            const next = d.items.slice();
+            const swapWith = direction === "up" ? idx - 1 : idx + 1;
+            if (swapWith < 0 || swapWith >= next.length) return d;
+            const tmp = next[idx];
+            next[idx] = next[swapWith];
+            next[swapWith] = tmp;
+            return { ...d, items: next };
+          }),
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    });
+  };
+
   // Simple inline editing for saved program: rename & change start date
   const updateSavedProgramField = (programId, field, value) => {
     setDb({
@@ -222,7 +308,7 @@ export default function ProgramTab({ db, setDb }) {
           </div>
         </div>
 
-        {/* Days */}
+        {/* Draft Days */}
         <div className="space-y-3">
           {days.map((day) => (
             <div key={day.id} className="rounded border border-zinc-700 p-3 space-y-3">
@@ -243,14 +329,14 @@ export default function ProgramTab({ db, setDb }) {
                 </div>
               </div>
 
-              {/* Add exercise to this day */}
+              {/* Add exercise to this draft day */}
               <div className="flex flex-col sm:flex-row gap-2">
                 <select
                   defaultValue=""
                   onChange={(e) => {
                     const v = e.target.value;
                     if (v) {
-                      addExerciseToDay(day.id, v);
+                      addExerciseToDraftDay(day.id, v);
                       e.target.value = "";
                     }
                   }}
@@ -267,7 +353,7 @@ export default function ProgramTab({ db, setDb }) {
                 </select>
               </div>
 
-              {/* Items for this day */}
+              {/* Items for this draft day */}
               <div className="space-y-2">
                 {day.items.length === 0 && (
                   <div className="text-sm text-zinc-400">No exercises yet.</div>
@@ -289,7 +375,9 @@ export default function ProgramTab({ db, setDb }) {
                         type="number"
                         min={1}
                         value={it.sets}
-                        onChange={(e) => updateItemField(day.id, it.id, "sets", e.target.value)}
+                        onChange={(e) =>
+                          updateDraftItemField(day.id, it.id, "sets", e.target.value)
+                        }
                         className="w-20 p-2 rounded bg-zinc-900 text-zinc-100"
                       />
                     </div>
@@ -300,29 +388,30 @@ export default function ProgramTab({ db, setDb }) {
                         type="number"
                         min={1}
                         value={it.reps}
-                        onChange={(e) => updateItemField(day.id, it.id, "reps", e.target.value)}
+                        onChange={(e) =>
+                          updateDraftItemField(day.id, it.id, "reps", e.target.value)
+                        }
                         className="w-20 p-2 rounded bg-zinc-900 text-zinc-100"
                       />
                     </div>
 
-                    {/* Reorder + Remove */}
                     <div className="flex justify-end gap-2">
                       <button
-                        onClick={() => moveItem(day.id, it.id, "up")}
+                        onClick={() => moveDraftItem(day.id, it.id, "up")}
                         className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
                         title="Move up"
                       >
                         ↑
                       </button>
                       <button
-                        onClick={() => moveItem(day.id, it.id, "down")}
+                        onClick={() => moveDraftItem(day.id, it.id, "down")}
                         className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
                         title="Move down"
                       >
                         ↓
                       </button>
                       <button
-                        onClick={() => deleteItem(day.id, it.id)}
+                        onClick={() => deleteDraftItem(day.id, it.id)}
                         className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-200 text-sm"
                         title="Remove exercise from this day"
                       >
@@ -346,16 +435,17 @@ export default function ProgramTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* ---------------- Saved Programs ---------------- */}
+      {/* ---------------- Saved Programs (fully editable) ---------------- */}
       <div className="space-y-3">
         <h2 className="text-lg font-semibold">Saved Programs</h2>
-        {savedPrograms.length === 0 && (
+        {(db.programs || []).length === 0 && (
           <div className="text-sm text-zinc-400">No programs yet.</div>
         )}
 
-        {savedPrograms.map((p) => {
+        {(db.programs || []).map((p) => {
           const weeks = p.startDate ? weeksBetween(p.startDate) + 1 : null;
-          const isActive = p.id === activeProgramId;
+          const isActive = p.id === db.activeProgramId;
+
           return (
             <div key={p.id} className="rounded border border-zinc-700 p-3 space-y-3">
               <div className="flex items-start sm:items-center justify-between gap-2">
@@ -405,9 +495,10 @@ export default function ProgramTab({ db, setDb }) {
                 </div>
               </div>
 
+              {/* Editable days & exercises */}
               <div className="space-y-2">
                 {p.days.map((d) => (
-                  <div key={d.id} className="rounded border border-zinc-700 p-2">
+                  <div key={d.id} className="rounded border border-zinc-700 p-2 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="font-medium">{d.name}</div>
                       <button
@@ -417,6 +508,31 @@ export default function ProgramTab({ db, setDb }) {
                         Delete Day
                       </button>
                     </div>
+
+                    {/* Add exercise to saved day */}
+                    <div className="flex gap-2">
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v) {
+                            addExerciseToSavedDay(p.id, d.id, v);
+                            e.target.value = "";
+                          }
+                        }}
+                        className="p-2 rounded bg-zinc-900 text-zinc-100"
+                      >
+                        <option value="" disabled>
+                          + Add exercise
+                        </option>
+                        {exercisesSorted.map((ex) => (
+                          <option key={ex.id} value={ex.id}>
+                            {ex.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div className="mt-2 space-y-1 text-sm">
                       {d.items.length === 0 && (
                         <div className="text-zinc-400">No exercises.</div>
@@ -424,17 +540,57 @@ export default function ProgramTab({ db, setDb }) {
                       {d.items.map((it, idx) => (
                         <div
                           key={it.id}
-                          className="flex items-center justify-between bg-zinc-900 rounded px-2 py-1"
+                          className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-center bg-zinc-900 rounded px-2 py-2"
                         >
-                          <div>
-                            {idx + 1}. {it.name} — {it.sets} × {it.reps}
+                          <div className="sm:col-span-2">
+                            {idx + 1}. {it.name}
                           </div>
-                          <button
-                            onClick={() => deleteSavedItem(p.id, d.id, it.id)}
-                            className="px-2 py-1 rounded bg-zinc-800 text-zinc-200"
-                          >
-                            Remove
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm text-zinc-300">Sets</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={it.sets}
+                              onChange={(e) =>
+                                updateSavedItemField(p.id, d.id, it.id, "sets", e.target.value)
+                              }
+                              className="w-20 p-2 rounded bg-zinc-800 text-zinc-100"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm text-zinc-300">Reps</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={it.reps}
+                              onChange={(e) =>
+                                updateSavedItemField(p.id, d.id, it.id, "reps", e.target.value)
+                              }
+                              className="w-20 p-2 rounded bg-zinc-800 text-zinc-100"
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => moveSavedItem(p.id, d.id, it.id, "up")}
+                              className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
+                              title="Move up"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              onClick={() => moveSavedItem(p.id, d.id, it.id, "down")}
+                              className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
+                              title="Move down"
+                            >
+                              ↓
+                            </button>
+                            <button
+                              onClick={() => deleteSavedItem(p.id, d.id, it.id)}
+                              className="px-2 py-1 rounded bg-zinc-800 text-zinc-200"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
