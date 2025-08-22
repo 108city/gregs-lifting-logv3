@@ -1,276 +1,241 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { saveLocalEdit } from "../syncService";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export default function LogTab({ db, setDb }) {
-  const programs = (db.programs || []).filter((p) => !p.deleted);
-  const activeProgram = programs.find((p) => p.active);
-
+  const activeProgram = (db.programs || []).find((p) => p.active);
   const [date, setDate] = useState(todayIso());
-  const [dayId, setDayId] = useState("");
+  const [dayId, setDayId] = useState(
+    activeProgram?.days?.[0]?.id || null
+  );
 
-  // Reset to first day when active program changes
-  useEffect(() => {
-    if (activeProgram?.days?.length > 0) {
-      setDayId(activeProgram.days[0].id);
-    }
-  }, [activeProgram]);
+  // Find the selected day
+  const day = activeProgram?.days?.find((d) => d.id === dayId);
 
-  const currentDay = useMemo(() => {
-    if (!activeProgram) return null;
-    return (activeProgram.days || []).find((d) => d.id === dayId);
-  }, [activeProgram, dayId]);
-
-  // Find last session for this program/day
+  // Last session for this day (before today)
   const lastSession = useMemo(() => {
-    if (!db.log) return null;
-    return (
-      db.log
-        .filter(
-          (l) =>
-            l.programId === activeProgram?.id &&
-            l.dayId === dayId &&
-            l.date < date
-        )
-        .sort((a, b) => b.date.localeCompare(a.date))[0] || null
+    const all = (db.log || []).filter(
+      (s) => s.programId === activeProgram?.id && s.dayId === dayId
     );
-  }, [db.log, activeProgram, dayId, date]);
+    return all.sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+  }, [db.log, activeProgram?.id, dayId]);
 
-  // Build working entries
-  const [entries, setEntries] = useState([]);
+  // Working draft of today’s log
+  const [working, setWorking] = useState(() =>
+    seedFromDay(day, lastSession, date)
+  );
+
   useEffect(() => {
-    if (currentDay) {
-      const base = (currentDay.items || []).filter((it) => !it.deleted);
-      setEntries(
-        base.map((it) => {
-          const lastEntry = lastSession?.entries?.find(
-            (e) => e.exerciseId === it.exerciseId
-          );
-          return {
-            id: `${dayId}_${it.id}`,
-            exerciseId: it.exerciseId,
-            name: it.name,
-            plannedSets: it.sets,
-            plannedReps: it.reps,
-            rating: lastEntry?.rating || null,
-            sets: Array.from({ length: it.sets }, (_, i) =>
-              lastEntry?.sets?.[i]
-                ? { ...lastEntry.sets[i] }
-                : { reps: it.reps, weight: "" }
-            ),
-          };
-        })
-      );
-    }
-  }, [currentDay, dayId, lastSession]);
+    setWorking(seedFromDay(day, lastSession, date));
+  }, [day, lastSession, date]);
 
-  const handleSetChange = (entryId, setIdx, field, value) => {
-    setEntries((prev) =>
-      prev.map((e) =>
-        e.id !== entryId
-          ? e
-          : {
+  // Edit a set value
+  const editSet = (entryId, setIdx, patch) =>
+    setWorking((w) => ({
+      ...w,
+      entries: w.entries.map((e) =>
+        e.id === entryId
+          ? {
               ...e,
               sets: e.sets.map((s, i) =>
-                i !== setIdx ? s : { ...s, [field]: value }
+                i === setIdx ? { ...s, ...patch } : s
               ),
             }
-      )
-    );
-  };
+          : e
+      ),
+    }));
 
-  const handleRatingChange = (entryId, rating) => {
-    setEntries((prev) =>
-      prev.map((e) =>
-        e.id !== entryId ? e : { ...e, rating: e.rating === rating ? null : rating }
-      )
-    );
-  };
+  // Update rating
+  const updateRating = (entryId, rating) =>
+    setWorking((w) => ({
+      ...w,
+      entries: w.entries.map((e) =>
+        e.id === entryId ? { ...e, rating } : e
+      ),
+    }));
 
-  const handleSave = async () => {
-    if (!activeProgram || !currentDay) return;
+  // Save session to DB
+  const saveSession = () => {
+    if (!activeProgram || !day) return;
 
-    const logRow = {
-      id: `${date}_${currentDay.id}`,
+    const newSession = {
+      id: Date.now().toString(36),
       programId: activeProgram.id,
-      programName: activeProgram.name,
-      dayId: currentDay.id,
-      dayName: currentDay.name,
+      dayId,
       date,
-      entries,
+      entries: working.entries,
     };
 
-    const next = await saveLocalEdit(db, (draft) => {
-      draft.log = Array.isArray(draft.log) ? draft.log : [];
-      draft.log = draft.log.filter(
-        (l) => !(l.date === date && l.dayId === currentDay.id)
-      );
-      draft.log.push(logRow);
+    setDb({
+      ...db,
+      log: [...(db.log || []).filter((s) => !(s.date === date && s.dayId === dayId)), newSession],
     });
-
-    setDb(next);
-    alert("✅ Workout saved!");
   };
 
   if (!activeProgram) {
-    return (
-      <div className="text-sm text-zinc-400">
-        No active program. Go to Programs and set one active.
-      </div>
-    );
+    return <div>No active program. Set one in Programs tab.</div>;
   }
 
   return (
     <div className="space-y-4">
-      {/* Program header */}
-      <div className="p-3 rounded border border-zinc-700 bg-zinc-900">
-        <div className="font-semibold">{activeProgram.name}</div>
-        <div className="text-xs text-zinc-400">
-          Started {activeProgram.startDate || "—"} · Week{" "}
-          {weeksSince(activeProgram.startDate) + 1}
-        </div>
+      <div>
+        <h2 className="text-xl font-semibold">{activeProgram.name}</h2>
+        <p className="text-sm text-zinc-400">
+          Started {activeProgram.startDate} · Week{" "}
+          {weeksBetween(activeProgram.startDate, todayIso()) + 1}
+        </p>
       </div>
 
-      {/* Date + Day selectors */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex flex-col">
-          <label className="text-sm text-zinc-400">Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="p-2 rounded bg-zinc-900 text-zinc-100"
-          />
-        </div>
-        <div className="flex flex-col flex-1">
-          <label className="text-sm text-zinc-400">Training Day</label>
-          <select
-            value={dayId}
-            onChange={(e) => setDayId(e.target.value)}
-            className="p-2 rounded bg-zinc-900 text-zinc-100"
-          >
-            {(activeProgram.days || [])
-              .filter((d) => !d.deleted)
-              .map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-          </select>
-        </div>
+      {/* Date + Day selector */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="p-2 rounded bg-zinc-900 text-zinc-100"
+        />
+        <select
+          value={dayId || ""}
+          onChange={(e) => setDayId(e.target.value)}
+          className="p-2 rounded bg-zinc-900 text-zinc-100"
+        >
+          {(activeProgram.days || []).map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Entries */}
-      {!currentDay ? (
-        <div className="text-sm text-zinc-400">No day selected.</div>
+      {!day ? (
+        <p>No day selected or this day has no exercises.</p>
       ) : (
         <div className="space-y-4">
-          {entries.map((entry) => (
-            <div key={entry.id} className="p-3 rounded border border-zinc-700 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">{entry.name}</div>
-                  <div className="text-xs text-zinc-400">
-                    Planned: {entry.plannedSets} × {entry.plannedReps}
-                  </div>
-                  {lastSession && (
-                    <div className="text-xs text-zinc-500">
-                      Last rating:{" "}
-                      {lastSession.entries.find((e) => e.exerciseId === entry.exerciseId)
-                        ?.rating || "—"}
+          {working.entries.map((entry) => {
+            const ex = (db.exercises || []).find(
+              (e) => e.id === entry.exerciseId
+            );
+            const prevEntry = lastSession?.entries.find(
+              (e) => e.exerciseId === entry.exerciseId
+            );
+            return (
+              <div key={entry.id} className="border rounded p-3 space-y-2">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="font-medium">{ex?.name}</div>
+                    <div className="text-xs text-zinc-400">
+                      Target: {entry.sets.length} × {entry.sets[0]?.reps || 0}
                     </div>
-                  )}
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => handleRatingChange(entry.id, "easy")}
-                    className={`px-2 py-1 rounded ${
-                      entry.rating === "easy" ? "bg-green-600 text-white" : "bg-zinc-800 text-zinc-200"
-                    }`}
-                  >
-                    Easy
-                  </button>
-                  <button
-                    onClick={() => handleRatingChange(entry.id, "moderate")}
-                    className={`px-2 py-1 rounded ${
-                      entry.rating === "moderate" ? "bg-amber-500 text-black" : "bg-zinc-800 text-zinc-200"
-                    }`}
-                  >
-                    Moderate
-                  </button>
-                  <button
-                    onClick={() => handleRatingChange(entry.id, "hard")}
-                    className={`px-2 py-1 rounded ${
-                      entry.rating === "hard" ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-200"
-                    }`}
-                  >
-                    Hard
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                {entry.sets.map((s, idx) => {
-                  const lastSet =
-                    lastSession?.entries
-                      ?.find((e) => e.exerciseId === entry.exerciseId)
-                      ?.sets?.[idx];
-                  return (
-                    <div
-                      key={idx}
-                      className="flex gap-2 items-center text-sm bg-zinc-800 rounded px-2 py-1"
+                    {prevEntry && (
+                      <div className="text-xs text-zinc-500">
+                        Last:{" "}
+                        {prevEntry.sets
+                          .map((s) => `${s.reps}r @ ${s.kg}kg`)
+                          .join(", ")}{" "}
+                        ({prevEntry.rating || "–"})
+                      </div>
+                    )}
+                  </div>
+                  {/* Rating buttons */}
+                  <div className="flex gap-1">
+                    <button
+                      className={`px-2 py-1 rounded ${
+                        entry.rating === "easy"
+                          ? "bg-green-600 text-white"
+                          : "bg-zinc-800 text-zinc-200"
+                      }`}
+                      onClick={() => updateRating(entry.id, "easy")}
                     >
-                      <span className="text-zinc-400">Set {idx + 1}</span>
+                      Easy
+                    </button>
+                    <button
+                      className={`px-2 py-1 rounded ${
+                        entry.rating === "moderate"
+                          ? "bg-amber-500 text-black"
+                          : "bg-zinc-800 text-zinc-200"
+                      }`}
+                      onClick={() => updateRating(entry.id, "moderate")}
+                    >
+                      Moderate
+                    </button>
+                    <button
+                      className={`px-2 py-1 rounded ${
+                        entry.rating === "hard"
+                          ? "bg-red-600 text-white"
+                          : "bg-zinc-800 text-zinc-200"
+                      }`}
+                      onClick={() => updateRating(entry.id, "hard")}
+                    >
+                      Hard
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {entry.sets.map((s, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <span className="text-xs w-12">Set {idx + 1}</span>
                       <input
                         type="number"
                         value={s.reps}
                         onChange={(e) =>
-                          handleSetChange(entry.id, idx, "reps", e.target.value)
+                          editSet(entry.id, idx, {
+                            reps: parseInt(e.target.value || "0", 10),
+                          })
                         }
                         className="w-16 p-1 rounded bg-zinc-900 text-zinc-100"
                       />
                       <input
                         type="number"
-                        value={s.weight}
-                        placeholder="kg"
+                        value={s.kg}
                         onChange={(e) =>
-                          handleSetChange(entry.id, idx, "weight", e.target.value)
+                          editSet(entry.id, idx, {
+                            kg: parseFloat(e.target.value || "0"),
+                          })
                         }
                         className="w-20 p-1 rounded bg-zinc-900 text-zinc-100"
                       />
-                      {lastSet && (
-                        <span className="text-xs text-zinc-500">
-                          Last: {lastSet.reps} × {lastSet.weight}kg
-                        </span>
-                      )}
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       <button
-        onClick={handleSave}
-        className="px-4 py-2 rounded bg-blue-600 text-white"
+        onClick={saveSession}
+        className="px-4 py-2 bg-blue-600 text-white rounded"
       >
-        Save Workout
+        Save Session
       </button>
     </div>
   );
 }
 
-function weeksSince(startIso, endIso = todayIso()) {
-  if (!startIso) return 0;
-  try {
-    const a = new Date(startIso + "T00:00:00");
-    const b = new Date(endIso + "T00:00:00");
-    return Math.floor((b - a) / (1000 * 60 * 60 * 24 * 7));
-  } catch {
-    return 0;
-  }
+function seedFromDay(day, lastSession, date) {
+  if (!day) return { date, entries: [] };
+  return {
+    date,
+    entries: (day.items || []).map((it) => {
+      const prev = lastSession?.entries.find((e) => e.exerciseId === it.exerciseId);
+      return {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        exerciseId: it.exerciseId,
+        sets: Array.from({ length: it.sets || 3 }, (_, i) => ({
+          reps: it.reps || 10,
+          kg: prev?.sets?.[i]?.kg || 0,
+        })),
+        rating: prev?.rating || null,
+      };
+    }),
+  };
+}
+
+function weeksBetween(startIso, endIso) {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const diff = end - start;
+  return Math.floor(diff / (1000 * 60 * 60 * 24 * 7));
 }
