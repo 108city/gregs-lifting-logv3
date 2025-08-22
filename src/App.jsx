@@ -1,154 +1,72 @@
-// src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
-import Tabs, { TabsList, TabsTrigger, TabsContent } from "./tabs/Tabs"; // <-- correct path
+import { loadFromCloud, saveToCloudDebounced } from "./syncService";
+import Tabs, { TabsList, TabsTrigger, TabsContent } from "./tabs/Tabs";
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
-import { sync } from "./syncService"; // make sure syncService.js exports `sync`
 
 const STORAGE_KEY = "gregs-lifting-log";
 
-function baseDb() {
-  return {
-    exercises: [],
-    programs: [],   // [{id,name,startDate,days:[{id,name,items:[{id,exerciseId,name,sets,reps}]}]}]
-    log: [],        // array of workout session entries (your LogTab format)
-    progress: [],   // optional derived/extra
-  };
-}
-function safeParse(json, fallback) {
-  try {
-    const v = JSON.parse(json);
-    return v && typeof v === "object" ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function safeLoad() {
-  if (typeof window === "undefined") return baseDb();
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  return safeParse(raw, baseDb());
-}
-
 export default function App() {
-  const [db, setDb] = useState(() => safeLoad());
-  const [activeTab, setActiveTab] = useState("log");
-  const [status, setStatus] = useState("");
-  const savingRef = useRef(false);
+  const [db, setDb] = useState(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw
+        ? JSON.parse(raw)
+        : { exercises: [], programs: [], log: [], progress: [], activeProgramId: null };
+    } catch {
+      return { exercises: [], programs: [], log: [], progress: [], activeProgramId: null };
+    }
+  });
 
-  // Initial cloud merge/sync on mount
+  const [activeTab, setActiveTab] = useState("log");
+  const hasHydratedFromCloud = useRef(false); // prevents first-render overwrite
+
+  // 1) Hydrate from cloud at startup
   useEffect(() => {
-    let cancelled = false;
+    let mounted = true;
     (async () => {
       try {
-        setStatus("Syncing…");
-        const merged = await sync(db);
-        if (!cancelled && merged && typeof merged === "object") {
-          setDb(merged);
-          try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-          } catch {}
-          setStatus("Synced");
-          setTimeout(() => !cancelled && setStatus(""), 1500);
-        } else {
-          setStatus("");
+        const cloud = await loadFromCloud();
+        if (!mounted) return;
+
+        // If cloud has data, prefer it over local (so redeploys pull your state)
+        if (cloud?.data && Object.keys(cloud.data).length) {
+          setDb(cloud.data);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud.data));
         }
-      } catch (err) {
-        console.error("Initial sync failed:", err);
-        setStatus("Cloud sync failed (working offline)");
-        setTimeout(() => !cancelled && setStatus(""), 2500);
+      } catch (e) {
+        console.warn("Cloud load failed:", e.message);
+      } finally {
+        hasHydratedFromCloud.current = true;
       }
     })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Save to local + attempt background sync whenever db changes
+  // 2) Persist every change locally + debounce save to Supabase
   useEffect(() => {
+    // Always keep a local copy
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     } catch {}
-    const t = setTimeout(async () => {
-      if (savingRef.current) return;
-      savingRef.current = true;
-      try {
-        const merged = await sync(db);
-        // If local is empty but cloud has data, adopt cloud copy
-        const localCount =
-          (db.exercises?.length ?? 0) +
-          (db.programs?.length ?? 0) +
-          (db.log?.length ?? 0) +
-          (db.progress?.length ?? 0);
-        const cloudCount =
-          (merged?.exercises?.length ?? 0) +
-          (merged?.programs?.length ?? 0) +
-          (merged?.log?.length ?? 0) +
-          (merged?.progress?.length ?? 0);
-        if (localCount === 0 && cloudCount > 0) {
-          setDb(merged);
-          try {
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-          } catch {}
-        }
-      } catch (err) {
-        console.warn("Background sync failed:", err?.message || err);
-      } finally {
-        savingRef.current = false;
-      }
-    }, 400);
-    return () => clearTimeout(t);
-  }, [db]);
 
-  // Manual import (kept for recovery)
-  const onImport = async (file) => {
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const incoming = safeParse(text, null);
-      if (!incoming) throw new Error("Invalid JSON");
-      setDb((cur) => {
-        const empty =
-          (cur.exercises?.length ?? 0) +
-            (cur.programs?.length ?? 0) +
-            (cur.log?.length ?? 0) +
-            (cur.progress?.length ?? 0) ===
-          0;
-        return empty ? incoming : { ...cur, ...incoming };
-      });
-      setStatus("Imported — will sync");
-      setTimeout(() => setStatus(""), 1500);
-    } catch {
-      alert("Import failed. Please select a valid JSON file.");
-    }
-  };
+    // Don’t push an initial empty/partial state before we’ve checked the cloud
+    if (!hasHydratedFromCloud.current) return;
+
+    // Debounced cloud save
+    saveToCloudDebounced(db);
+  }, [db]);
 
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
-      <header className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">Greg&apos;s Lifting Log</h1>
-          {status && (
-            <div className="text-xs text-zinc-300 mt-1" role="status">
-              {status}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm bg-zinc-800 text-zinc-200 px-3 py-1.5 rounded cursor-pointer">
-            Import Data
-            <input
-              type="file"
-              accept="application/json"
-              className="hidden"
-              onChange={(e) => onImport(e.target.files?.[0])}
-            />
-          </label>
-        </div>
-      </header>
+      <h1 className="text-3xl font-bold mb-6">Greg&apos;s Lifting Log</h1>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="bg-zinc-900">
+        <TabsList className="mb-4">
           <TabsTrigger value="log">Log</TabsTrigger>
           <TabsTrigger value="progress">Progress</TabsTrigger>
           <TabsTrigger value="program">Program</TabsTrigger>
