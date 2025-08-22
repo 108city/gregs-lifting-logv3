@@ -31,46 +31,6 @@ export default function ExercisesTab({ db, setDb }) {
     setDb(next);
   };
 
-  // --- Import: replace the whole DB from a JSON export (safest path) ---
-  const handleImport = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow importing same file again later
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-
-      // Minimal shape check
-      if (typeof parsed !== "object" || parsed === null) {
-        throw new Error("Invalid JSON structure.");
-      }
-
-      // If it obviously looks like your app DB, load it
-      const looksOk =
-        Array.isArray(parsed.exercises) ||
-        Array.isArray(parsed.programs) ||
-        Array.isArray(parsed.workouts) ||
-        Array.isArray(parsed.log) ||
-        Array.isArray(parsed.progress);
-
-      if (!looksOk) {
-        throw new Error("This file doesn’t look like a LiftLog backup.");
-      }
-
-      setDb(parsed); // your app’s autosync should push this to cloud
-      // Optional: force a fast local persist (if your App.jsx doesn’t already do it on state change)
-      try {
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(parsed));
-      } catch {}
-
-      alert("Import complete. Your data has been loaded.");
-    } catch (err) {
-      console.error(err);
-      alert("Import failed: " + (err?.message || "Invalid file."));
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div>
@@ -112,21 +72,6 @@ export default function ExercisesTab({ db, setDb }) {
             ))}
           </ul>
         )}
-      </div>
-
-      {/* --- Import Data (temporary restore path) --- */}
-      <div className="pt-4 border-t border-zinc-700">
-        <h3 className="text-lg font-semibold mb-2">Import Data</h3>
-        <p className="text-sm text-zinc-400 mb-2">
-          Load a JSON backup. This replaces the current data in the app, then your normal
-          sync will push it to the cloud.
-        </p>
-        <input
-          type="file"
-          accept="application/json"
-          onChange={handleImport}
-          className="block w-full text-sm text-white file:mr-3 file:py-2 file:px-3 file:rounded file:border-0 file:bg-zinc-800 file:text-white hover:file:bg-zinc-700"
-        />
       </div>
     </div>
   );
