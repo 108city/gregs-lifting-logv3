@@ -1,19 +1,26 @@
 // src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
-import Tabs, { TabsList, TabsTrigger, TabsContent } from "./Tabs";
+import Tabs, { TabsList, TabsTrigger, TabsContent } from "./tabs/Tabs"; // <-- correct path
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
-import { sync } from "./syncService";
+import { sync } from "./syncService"; // make sure syncService.js exports `sync`
 
 const STORAGE_KEY = "gregs-lifting-log";
 
+function baseDb() {
+  return {
+    exercises: [],
+    programs: [],   // [{id,name,startDate,days:[{id,name,items:[{id,exerciseId,name,sets,reps}]}]}]
+    log: [],        // array of workout session entries (your LogTab format)
+    progress: [],   // optional derived/extra
+  };
+}
 function safeParse(json, fallback) {
   try {
     const v = JSON.parse(json);
-    if (!v || typeof v !== "object") return fallback;
-    return v;
+    return v && typeof v === "object" ? v : fallback;
   } catch {
     return fallback;
   }
@@ -23,35 +30,26 @@ function safeLoad() {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   return safeParse(raw, baseDb());
 }
-function baseDb() {
-  return {
-    exercises: [],
-    programs: [],   // [{id,name,startDate,days:[{id,name,items:[{id,exerciseId,name,sets,reps}]}]}]
-    log: [],        // your sessions go here if you use them
-    progress: [],   // optional derived data
-  };
-}
 
 export default function App() {
   const [db, setDb] = useState(() => safeLoad());
   const [activeTab, setActiveTab] = useState("log");
-  const [status, setStatus] = useState(""); // UX banner for sync errors/info
-  const savingRef = useRef(false);          // prevent re-entrant syncs
+  const [status, setStatus] = useState("");
+  const savingRef = useRef(false);
 
-  // Load from cloud and merge on first mount
+  // Initial cloud merge/sync on mount
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setStatus("Syncing…");
-        const merged = await sync(db); // merges with cloud (newest wins) and saves up
+        const merged = await sync(db);
         if (!cancelled && merged && typeof merged === "object") {
           setDb(merged);
           try {
             window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
           } catch {}
           setStatus("Synced");
-          // Clear banner after a moment
           setTimeout(() => !cancelled && setStatus(""), 1500);
         } else {
           setStatus("");
@@ -59,34 +57,35 @@ export default function App() {
       } catch (err) {
         console.error("Initial sync failed:", err);
         setStatus("Cloud sync failed (working offline)");
-        // fade the banner later
         setTimeout(() => !cancelled && setStatus(""), 2500);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once
+  }, []);
 
-  // Persist locally & try background sync on any change
+  // Save to local + attempt background sync whenever db changes
   useEffect(() => {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     } catch {}
-    // debounce & avoid overlapping syncs
     const t = setTimeout(async () => {
       if (savingRef.current) return;
       savingRef.current = true;
       try {
         const merged = await sync(db);
-        // Do NOT force-replace local state with merged each time to avoid flicker
-        // Only update local copy if structure is empty and cloud has data
-        if (
-          (!db || (db.exercises?.length ?? 0) + (db.programs?.length ?? 0) + (db.log?.length ?? 0) + (db.progress?.length ?? 0) === 0) &&
-          merged &&
-          ((merged.exercises?.length ?? 0) + (merged.programs?.length ?? 0) + (merged.log?.length ?? 0) + (merged.progress?.length ?? 0) > 0)
-        ) {
+        // If local is empty but cloud has data, adopt cloud copy
+        const localCount =
+          (db.exercises?.length ?? 0) +
+          (db.programs?.length ?? 0) +
+          (db.log?.length ?? 0) +
+          (db.progress?.length ?? 0);
+        const cloudCount =
+          (merged?.exercises?.length ?? 0) +
+          (merged?.programs?.length ?? 0) +
+          (merged?.log?.length ?? 0) +
+          (merged?.progress?.length ?? 0);
+        if (localCount === 0 && cloudCount > 0) {
           setDb(merged);
           try {
             window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
@@ -101,16 +100,14 @@ export default function App() {
     return () => clearTimeout(t);
   }, [db]);
 
-  // Temporary: allow importing a local backup so you can recover if needed
+  // Manual import (kept for recovery)
   const onImport = async (file) => {
     if (!file) return;
     try {
       const text = await file.text();
       const incoming = safeParse(text, null);
       if (!incoming) throw new Error("Invalid JSON");
-      // merge locally (newest wins handled by sync service), but set state now
       setDb((cur) => {
-        // shallow prefer incoming if cur is empty
         const empty =
           (cur.exercises?.length ?? 0) +
             (cur.programs?.length ?? 0) +
@@ -121,8 +118,8 @@ export default function App() {
       });
       setStatus("Imported — will sync");
       setTimeout(() => setStatus(""), 1500);
-    } catch (e) {
-      alert("Import failed. Make sure you selected a valid JSON export.");
+    } catch {
+      alert("Import failed. Please select a valid JSON file.");
     }
   };
 
@@ -138,7 +135,6 @@ export default function App() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Import only (kept for safety) */}
           <label className="text-sm bg-zinc-800 text-zinc-200 px-3 py-1.5 rounded cursor-pointer">
             Import Data
             <input
