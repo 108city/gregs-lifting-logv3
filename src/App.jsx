@@ -1,83 +1,116 @@
 // src/App.jsx
-import React, { useEffect, useState } from "react";
-import { sync } from "./syncService";
-
-import Tabs, { TabsList, TabsTrigger, TabsContent } from "./tabs/Tabs";
+import React, { useEffect, useRef, useState } from "react";
+import * as T from "./tabs/Tabs"; // <- uses src/tabs/Tabs.jsx
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
+import { sync } from "./syncService"; // must exist/export in syncService.js
+
+const STORAGE_KEY = "gregs-lifting-log";
+
+// Safe load from localStorage
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Safe save to localStorage
+function saveLocal(db) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  } catch {}
+}
 
 export default function App() {
-  // === State ===
-  const [db, setDb] = useState(() => {
-    try {
-      const local = localStorage.getItem("gregs-lifting-log");
-      return local
-        ? JSON.parse(local)
-        : { exercises: [], programs: [], log: [], progress: [] };
-    } catch {
-      return { exercises: [], programs: [], log: [], progress: [] };
-    }
-  });
+  // App DB state: we don’t enforce a strict shape here—your tabs own the structure.
+  const [db, setDb] = useState(() => loadLocal());
 
-  const [activeTab, setActiveTab] = useState("log");
+  // Which tab is visible
+  const [tab, setTab] = useState("log");
 
-  // 🔄 Sync on load
+  // ---- Initial load: pull local, then try cloud merge once ----
   useEffect(() => {
-    async function init() {
+    let mounted = true;
+    (async () => {
       try {
-        const merged = await sync(db);
-        setDb(merged);
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(merged));
-      } catch (err) {
-        console.error("Initial sync failed:", err.message);
+        const local = loadLocal();
+        // Try a one-shot sync on startup
+        const merged = await sync(local); // syncService.js should handle “first row” creation
+        if (mounted && merged && typeof merged === "object") {
+          setDb(merged);
+          saveLocal(merged);
+        }
+      } catch (e) {
+        // If cloud is unreachable, we silently continue with local data
+        console.warn("Initial sync failed, using local only:", e?.message || e);
       }
-    }
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // 💾 Sync whenever db changes
+  // ---- Auto save local + debounce cloud sync whenever db changes ----
+  const syncTimer = useRef(null);
   useEffect(() => {
-    async function persist() {
+    // Always persist locally immediately
+    saveLocal(db);
+
+    // Debounced cloud write to avoid chatty network calls while typing
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(async () => {
       try {
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
-        const merged = await sync(db);
-        setDb(merged);
-      } catch (err) {
-        console.error("Background sync failed:", err.message);
+        const merged = await sync(loadLocal());
+        if (merged && typeof merged === "object") {
+          // If remote had newer pieces, merge() will include them — keep local in step
+          setDb(merged);
+          saveLocal(merged);
+        }
+      } catch (e) {
+        console.warn("Background sync failed (will retry on next change):", e?.message || e);
       }
-    }
-    persist();
+    }, 800);
+
+    return () => {
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+    };
   }, [db]);
 
-  // === UI ===
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
-      <h1 className="text-3xl font-bold mb-6">Greg&apos;s Lifting Log</h1>
+      <header className="mb-4 flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Greg&apos;s Lifting Log</h1>
+      </header>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="log">Log</TabsTrigger>
-          <TabsTrigger value="progress">Progress</TabsTrigger>
-          <TabsTrigger value="program">Program</TabsTrigger>
-          <TabsTrigger value="exercises">Exercises</TabsTrigger>
-        </TabsList>
+      <T.Tabs value={tab} onValueChange={setTab}>
+        <T.TabsList className="bg-zinc-900">
+          <T.TabsTrigger value="log">Log</T.TabsTrigger>
+          <T.TabsTrigger value="progress">Progress</T.TabsTrigger>
+          <T.TabsTrigger value="program">Program</T.TabsTrigger>
+          <T.TabsTrigger value="exercises">Exercises</T.TabsTrigger>
+        </T.TabsList>
 
-        <TabsContent value="log">
+        <T.TabsContent value="log">
           <LogTab db={db} setDb={setDb} />
-        </TabsContent>
-        <TabsContent value="progress">
+        </T.TabsContent>
+
+        <T.TabsContent value="progress">
           <ProgressTab db={db} />
-        </TabsContent>
-        <TabsContent value="program">
+        </T.TabsContent>
+
+        <T.TabsContent value="program">
           <ProgramTab db={db} setDb={setDb} />
-        </TabsContent>
-        <TabsContent value="exercises">
+        </T.TabsContent>
+
+        <T.TabsContent value="exercises">
           <ExercisesTab db={db} setDb={setDb} />
-        </TabsContent>
-      </Tabs>
+        </T.TabsContent>
+      </T.Tabs>
     </div>
   );
 }
