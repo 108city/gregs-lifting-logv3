@@ -1,77 +1,121 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState } from "react";
 
-// --- helpers ---
 const todayIso = () => new Date().toISOString().slice(0, 10);
-const weeksSince = (startIso) => {
-  if (!startIso) return 0;
-  const a = new Date(startIso + "T00:00:00");
-  const b = new Date();
-  const ms = b - a;
-  if (Number.isNaN(ms)) return 0;
-  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24 * 7)));
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+const clampInt = (v, min, max) => {
+  const n = parseInt(v, 10);
+  if (Number.isNaN(n)) return min;
+  return Math.max(min, Math.min(max, n));
 };
-const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-
-// last session for same (programId, dayId) before a given date
-function findLastSession(log = [], programId, dayId, beforeDate) {
-  return log
-    .filter((s) => s.programId === programId && s.dayId === dayId && s.date < beforeDate)
-    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-}
-
-// max seen weight for an exercise across all time (useful as a hint)
-function maxWeightForExercise(log = [], exerciseId) {
-  let m = -Infinity;
-  for (const s of log) {
-    for (const e of s.entries || []) {
-      if (e.exerciseId !== exerciseId) continue;
-      for (const st of e.sets || []) {
-        const w = parseFloat(st.kg);
-        if (!Number.isNaN(w)) m = Math.max(m, w);
-      }
-    }
+const clampFloat = (v, min, max) => {
+  const n = parseFloat(v);
+  if (Number.isNaN(n)) return min;
+  return Math.max(min, Math.min(max, n));
+};
+const weeksBetween = (startIso, endIso = todayIso()) => {
+  try {
+    const a = new Date(startIso + "T00:00:00");
+    const b = new Date(endIso + "T00:00:00");
+    const ms = b - a;
+    if (isNaN(ms)) return 0;
+    return Math.floor(ms / (1000 * 60 * 60 * 24 * 7));
+  } catch {
+    return 0;
   }
-  return m === -Infinity ? 0 : m;
+};
+
+// tiny helpers to color rating labels
+const ratingClasses = (r) =>
+  r === "easy"
+    ? "text-green-500"
+    : r === "moderate"
+    ? "text-orange-400"
+    : r === "hard"
+    ? "text-red-500"
+    : "text-zinc-400";
+
+const ratingBtnClasses = (active, color) =>
+  `px-2 py-1 rounded text-sm ${
+    active
+      ? color === "green"
+        ? "bg-green-600 text-white"
+        : color === "orange"
+        ? "bg-orange-500 text-black"
+        : "bg-red-600 text-white"
+      : "bg-zinc-800 text-zinc-200"
+  }`;
+
+/**
+ * Build a working session for the UI from the active program/day + last session.
+ * Auto-fills reps from program, kg from last time on this day, and auto-selects last rating.
+ */
+function seedWorking(db, program, day, date) {
+  if (!program || !day) return { date, entries: [] };
+
+  const lastSession = (db.log || [])
+    .filter((s) => s.programId === program.id && s.dayId === day.id && s.date < date)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+  return {
+    date,
+    programId: program.id,
+    dayId: day.id,
+    entries: (day.items || []).map((it) => {
+      const prevEntry = lastSession?.entries?.find((e) => e.exerciseId === it.exerciseId);
+      const sets = Array.from({ length: clampInt(it.sets ?? 1, 1, 100) }, (_, i) => ({
+        reps: String(clampInt(it.reps ?? 1, 1, 100)),
+        kg:
+          prevEntry?.sets?.[i]?.kg !== undefined && prevEntry?.sets?.[i]?.kg !== null
+            ? String(prevEntry.sets[i].kg)
+            : "",
+      }));
+      return {
+        id: genId(),
+        exerciseId: it.exerciseId,
+        exerciseName: it.name,
+        rating: prevEntry?.rating ?? null, // auto-select last time’s rating
+        sets,
+      };
+    }),
+  };
 }
 
 export default function LogTab({ db, setDb }) {
   const programs = db.programs || [];
-  const activeProgram = programs.find((p) => p.id === db.activeProgramId) || null;
-  const days = activeProgram?.days || [];
+  const activeProgram =
+    programs.find((p) => p.id === db.activeProgramId) || programs[0] || null;
 
-  // --- UI state ---
   const [date, setDate] = useState(todayIso());
-  const [dayId, setDayId] = useState(days[0]?.id || "");
+  const dayList = activeProgram?.days || [];
+  const [dayId, setDayId] = useState(dayList[0]?.id || "");
 
   useEffect(() => {
-    if (days.length && !days.find((d) => d.id === dayId)) {
-      setDayId(days[0].id);
+    if (dayList.length && !dayList.find((d) => d.id === dayId)) {
+      setDayId(dayList[0].id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProgram?.id]);
 
+  const day = dayList.find((d) => d.id === dayId) || null;
+
+  // Build working state from program/day + last session
+  const [working, setWorking] = useState(() => seedWorking(db, activeProgram, day, date));
   useEffect(() => {
-    if (!dayId && days[0]) setDayId(days[0].id);
-  }, [days, dayId]);
+    setWorking(seedWorking(db, activeProgram, day, date));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(day), activeProgram?.id, date, JSON.stringify(db.log)]);
 
-  const day = days.find((d) => d.id === dayId) || null;
+  // last session for "Last: ..." line + last rating display
+  const lastSession = useMemo(() => {
+    if (!activeProgram || !day) return null;
+    return (db.log || [])
+      .filter((s) => s.programId === activeProgram.id && s.dayId === day.id && s.date < date)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+  }, [db.log, activeProgram?.id, day?.id, date]);
 
-  // Find the most recent previous session for this program/day
-  const lastSession = useMemo(
-    () => (activeProgram && day ? findLastSession(db.log || [], activeProgram.id, day.id, date) : null),
-    [db.log, activeProgram, day, date]
-  );
-
-  // --- Working session (editor) ---
-  const [working, setWorking] = useState(() => seedFromProgram(activeProgram, day, date, db.log));
-
-  // Reseed when key inputs change
-  useEffect(() => {
-    setWorking(seedFromProgram(activeProgram, day, date, db.log));
-  }, [activeProgram?.id, day?.id, date, db.log]);
-
-  const editSet = (entryId, setIdx, patch) => {
+  // --- editing helpers ---
+  const editSet = (entryId, setIdx, patch) =>
     setWorking((w) => ({
       ...w,
       entries: w.entries.map((e) =>
@@ -83,215 +127,189 @@ export default function LogTab({ db, setDb }) {
           : e
       ),
     }));
-  };
 
-  const setEntryRating = (entryId, rating) => {
+  const setRating = (entryId, rating) =>
     setWorking((w) => ({
       ...w,
       entries: w.entries.map((e) =>
         e.id === entryId ? { ...e, rating: e.rating === rating ? null : rating } : e
       ),
     }));
-  };
 
   const saveSession = () => {
     if (!activeProgram || !day) return;
 
-    // Normalize numbers
-    const normalizedEntries = working.entries.map((e) => ({
-      id: e.id,
-      exerciseId: e.exerciseId,
-      name: e.name,
-      rating: e.rating ?? null,
-      sets: e.sets.map((st) => ({
-        reps: clampInt(st.reps, 0, 10000),
-        kg: clampFloat(st.kg, 0, 100000),
-      })),
-    }));
-
-    const newSession = {
-      id: working.id || genId(),
+    const normalized = {
+      id: genId(),
       date,
       programId: activeProgram.id,
       dayId: day.id,
-      entries: normalizedEntries,
-      updatedAt: new Date().toISOString(),
+      entries: working.entries.map((e) => ({
+        exerciseId: e.exerciseId,
+        exerciseName: e.exerciseName,
+        rating: e.rating ?? null,
+        sets: e.sets.map((s) => ({
+          reps: clampInt(String(s.reps || "0"), 0, 10000),
+          kg: clampFloat(String(s.kg || "0"), 0, 100000),
+        })),
+      })),
     };
 
-    // Replace if same date+program+day already exists, else append
     const existingIdx = (db.log || []).findIndex(
       (s) => s.date === date && s.programId === activeProgram.id && s.dayId === day.id
     );
+
     const nextLog =
       existingIdx >= 0
-        ? (db.log || []).map((s, i) => (i === existingIdx ? newSession : s))
-        : [...(db.log || []), newSession];
+        ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
+        : [...(db.log || []), normalized];
 
     setDb({ ...db, log: nextLog });
-    alert("Session saved ✅");
   };
 
-  // --- UI ---
+  // ---- UI ----
   if (!activeProgram) {
     return (
-      <div className="text-sm text-zinc-400">
-        No active workout. Go to <span className="text-white font-medium">Program</span> and set
-        one as active.
+      <div className="text-sm text-zinc-300">
+        No active program. Create one in the Program tab and set it active.
       </div>
     );
   }
 
   return (
-    <div className="space-y-5">
-      {/* Header: Active workout + weeks since start */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <div className="text-lg font-semibold text-white">
-            Active: {activeProgram.name}
-          </div>
-          <div className="text-xs text-zinc-400">
-            Started {activeProgram.startDate || "—"} · Week {weeksSince(activeProgram.startDate) + 1}
-          </div>
-        </div>
-
-        {/* Controls: Date + Day */}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Log Date</label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="px-2 py-1 rounded bg-zinc-900 text-white border border-zinc-700"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Program Day</label>
-            <select
-              value={dayId}
-              onChange={(e) => setDayId(e.target.value)}
-              className="px-2 py-1 rounded bg-zinc-900 text-white border border-zinc-700"
-            >
-              {days.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </div>
+    <div className="space-y-4">
+      {/* Header: program + weeks */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-lg font-semibold">{activeProgram.name}</div>
+        <div className="text-xs text-zinc-400">
+          Started {activeProgram.startDate || "—"} · Week{" "}
+          {weeksBetween(activeProgram.startDate) + 1}
         </div>
       </div>
 
-      {!day || day.items.length === 0 ? (
-        <div className="text-sm text-zinc-400">
-          This day has no programmed exercises yet. Add some in the Program tab.
+      {/* Date + Day pickers */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <label className="text-sm text-zinc-300">Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value || todayIso())}
+            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+          />
         </div>
+        <div className="space-y-1 sm:col-span-2">
+          <label className="text-sm text-zinc-300">Training Day</label>
+          <select
+            value={dayId}
+            onChange={(e) => setDayId(e.target.value)}
+            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+          >
+            {dayList.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Entries */}
+      {!day || (working.entries || []).length === 0 ? (
+        <div className="text-sm text-zinc-400">This day has no programmed exercises yet.</div>
       ) : (
         <div className="space-y-4">
           {working.entries.map((entry) => {
             const prevEntry = lastSession?.entries?.find(
               (e) => e.exerciseId === entry.exerciseId
             );
-            const globalBest = maxWeightForExercise(db.log || [], entry.exerciseId);
+            const lastRatingLabel = prevEntry?.rating
+              ? prevEntry.rating[0].toUpperCase() + prevEntry.rating.slice(1)
+              : null;
+            const lastRatingClass = ratingClasses(prevEntry?.rating || "");
 
             return (
               <div key={entry.id} className="rounded border border-zinc-700">
                 <div className="p-3 flex items-center justify-between gap-2 flex-wrap">
                   <div>
-                    <div className="font-medium text-white">{entry.name}</div>
+                    <div className="font-medium">{entry.exerciseName}</div>
                     <div className="text-xs text-zinc-400">
-                      Target: {entry.targetSets} × {entry.targetReps}
+                      Target:{" "}
+                      {(() => {
+                        // find programmed sets x reps from day
+                        const programmed = day.items.find((it) => it.exerciseId === entry.exerciseId);
+                        const sets = programmed?.sets ?? entry.sets?.length ?? 0;
+                        const reps = programmed?.reps ?? (entry.sets?.[0]?.reps ? Number(entry.sets[0].reps) : 0);
+                        return `${sets} × ${reps}`;
+                      })()}
                     </div>
-                    {prevEntry && (
-                      <div className="text-xs text-zinc-500 mt-1">
-                        Last rating:{" "}
-                        <span className="text-white">
-                          {prevEntry.rating ? titleCase(prevEntry.rating) : "—"}
-                        </span>
+                    {lastRatingLabel && (
+                      <div className="text-xs">
+                        Last rating: <span className={lastRatingClass}>{lastRatingLabel}</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Rating buttons */}
+                  {/* rating buttons */}
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => setEntryRating(entry.id, "easy")}
-                      className={`h-7 px-2 rounded ${
-                        entry.rating === "easy"
-                          ? "bg-green-600 text-white"
-                          : "bg-zinc-800 text-zinc-200"
-                      }`}
-                      title="Easy"
+                      className={ratingBtnClasses(entry.rating === "easy", "green")}
+                      onClick={() => setRating(entry.id, "easy")}
+                      title="Felt easy — go up next time"
                     >
                       Easy
                     </button>
                     <button
-                      onClick={() => setEntryRating(entry.id, "moderate")}
-                      className={`h-7 px-2 rounded ${
-                        entry.rating === "moderate"
-                          ? "bg-amber-500 text-black"
-                          : "bg-zinc-800 text-zinc-200"
-                      }`}
-                      title="Moderate"
+                      className={ratingBtnClasses(entry.rating === "moderate", "orange")}
+                      onClick={() => setRating(entry.id, "moderate")}
+                      title="Felt okay — hold next time"
                     >
                       Moderate
                     </button>
                     <button
-                      onClick={() => setEntryRating(entry.id, "hard")}
-                      className={`h-7 px-2 rounded ${
-                        entry.rating === "hard"
-                          ? "bg-red-600 text-white"
-                          : "bg-zinc-800 text-zinc-200"
-                      }`}
-                      title="Hard"
+                      className={ratingBtnClasses(entry.rating === "hard", "red")}
+                      onClick={() => setRating(entry.id, "hard")}
+                      title="Felt hard — go down next time"
                     >
                       Hard
                     </button>
                   </div>
                 </div>
 
-                <div className="border-t border-zinc-800 p-3 space-y-2">
+                <div className="border-t border-zinc-700 p-3 space-y-2">
                   {entry.sets.map((s, idx) => {
                     const prevSet = prevEntry?.sets?.[idx];
                     return (
-                      <div key={idx} className="grid grid-cols-4 gap-2 items-center">
+                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
                         <div className="text-sm text-zinc-400">Set {idx + 1}</div>
 
                         {/* Reps input */}
-                        <div className="flex flex-col">
-                          <label className="text-[11px] text-zinc-400 mb-0.5">Reps</label>
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            value={s.reps}
-                            onChange={(e) =>
-                              editSet(entry.id, idx, { reps: e.target.value })
-                            }
-                            placeholder="Reps"
-                            className="px-2 py-1 rounded bg-zinc-900 text-white border border-zinc-700"
-                          />
-                        </div>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={String(s.reps)}
+                          onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
+                          placeholder="Reps"
+                          className="p-2 rounded bg-zinc-900 text-zinc-100"
+                        />
 
                         {/* Weight input */}
-                        <div className="flex flex-col">
-                          <label className="text-[11px] text-zinc-400 mb-0.5">Weight (kg)</label>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            step="0.1"
-                            value={s.kg}
-                            onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
-                            placeholder="Weight (kg)"
-                            className="px-2 py-1 rounded bg-zinc-900 text-white border border-zinc-700"
-                          />
-                        </div>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.5"
+                          value={String(s.kg)}
+                          onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
+                          placeholder="Weight (kg)"
+                          className="p-2 rounded bg-zinc-900 text-zinc-100"
+                        />
 
-                        {/* Last time hint */}
-                        <div className="text-xs text-zinc-500">
+                        {/* Last time */}
+                        <div className="text-xs text-zinc-400">
                           {prevSet
-                            ? `Last: ${prevSet.reps}r @ ${prevSet.kg}kg`
-                            : globalBest > 0
-                            ? `Prev best: ${globalBest}kg`
+                            ? `Last: ${prevSet.reps} reps @ ${prevSet.kg} kg`
                             : "—"}
                         </div>
                       </div>
@@ -303,10 +321,7 @@ export default function LogTab({ db, setDb }) {
           })}
 
           <div className="flex justify-end">
-            <button
-              onClick={saveSession}
-              className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white"
-            >
+            <button onClick={saveSession} className="px-4 py-2 rounded bg-blue-600 text-white">
               Save
             </button>
           </div>
@@ -315,51 +330,3 @@ export default function LogTab({ db, setDb }) {
     </div>
   );
 }
-
-// --- seed working editor from program definition + history ---
-function seedFromProgram(program, day, date, log) {
-  if (!program || !day) return { id: genId(), date, programId: null, dayId: null, entries: [] };
-
-  const last = findLastSession(log || [], program.id, day.id, date);
-
-  const entries = (day.items || []).map((it) => {
-    const prevEntry = last?.entries?.find((e) => e.exerciseId === it.exerciseId);
-    const sets = Array.from({ length: it.sets }, (_, i) => {
-      const prev = prevEntry?.sets?.[i];
-      return {
-        reps: String(it.reps), // prefill with target reps
-        kg: prev?.kg !== undefined ? String(prev.kg) : "", // prefill with last weight if any
-      };
-    });
-    return {
-      id: genId(),
-      exerciseId: it.exerciseId,
-      name: it.name,
-      targetSets: it.sets,
-      targetReps: it.reps,
-      rating: null,
-      sets,
-    };
-  });
-
-  return {
-    id: genId(),
-    date,
-    programId: program.id,
-    dayId: day.id,
-    entries,
-  };
-}
-
-// --- small utils ---
-const clampInt = (v, min, max) => {
-  const n = parseInt(v, 10);
-  if (Number.isNaN(n)) return min;
-  return Math.max(min, Math.min(max, n));
-};
-const clampFloat = (v, min, max) => {
-  const n = parseFloat(v);
-  if (Number.isNaN(n)) return min;
-  return Math.max(min, Math.min(max, n));
-};
-const titleCase = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
