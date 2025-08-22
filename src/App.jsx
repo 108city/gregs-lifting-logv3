@@ -1,116 +1,180 @@
 // src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
-import * as T from "./tabs/Tabs"; // <- uses src/tabs/Tabs.jsx
+import Tabs, { TabsList, TabsTrigger, TabsContent } from "./Tabs";
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
-import { sync } from "./syncService"; // must exist/export in syncService.js
+import { sync } from "./syncService";
 
 const STORAGE_KEY = "gregs-lifting-log";
 
-// Safe load from localStorage
-function loadLocal() {
+function safeParse(json, fallback) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const v = JSON.parse(json);
+    if (!v || typeof v !== "object") return fallback;
+    return v;
   } catch {
-    return {};
+    return fallback;
   }
 }
-
-// Safe save to localStorage
-function saveLocal(db) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-  } catch {}
+function safeLoad() {
+  if (typeof window === "undefined") return baseDb();
+  const raw = window.localStorage.getItem(STORAGE_KEY);
+  return safeParse(raw, baseDb());
+}
+function baseDb() {
+  return {
+    exercises: [],
+    programs: [],   // [{id,name,startDate,days:[{id,name,items:[{id,exerciseId,name,sets,reps}]}]}]
+    log: [],        // your sessions go here if you use them
+    progress: [],   // optional derived data
+  };
 }
 
 export default function App() {
-  // App DB state: we don’t enforce a strict shape here—your tabs own the structure.
-  const [db, setDb] = useState(() => loadLocal());
+  const [db, setDb] = useState(() => safeLoad());
+  const [activeTab, setActiveTab] = useState("log");
+  const [status, setStatus] = useState(""); // UX banner for sync errors/info
+  const savingRef = useRef(false);          // prevent re-entrant syncs
 
-  // Which tab is visible
-  const [tab, setTab] = useState("log");
-
-  // ---- Initial load: pull local, then try cloud merge once ----
+  // Load from cloud and merge on first mount
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
     (async () => {
       try {
-        const local = loadLocal();
-        // Try a one-shot sync on startup
-        const merged = await sync(local); // syncService.js should handle “first row” creation
-        if (mounted && merged && typeof merged === "object") {
+        setStatus("Syncing…");
+        const merged = await sync(db); // merges with cloud (newest wins) and saves up
+        if (!cancelled && merged && typeof merged === "object") {
           setDb(merged);
-          saveLocal(merged);
+          try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          } catch {}
+          setStatus("Synced");
+          // Clear banner after a moment
+          setTimeout(() => !cancelled && setStatus(""), 1500);
+        } else {
+          setStatus("");
         }
-      } catch (e) {
-        // If cloud is unreachable, we silently continue with local data
-        console.warn("Initial sync failed, using local only:", e?.message || e);
+      } catch (err) {
+        console.error("Initial sync failed:", err);
+        setStatus("Cloud sync failed (working offline)");
+        // fade the banner later
+        setTimeout(() => !cancelled && setStatus(""), 2500);
       }
     })();
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once
 
-  // ---- Auto save local + debounce cloud sync whenever db changes ----
-  const syncTimer = useRef(null);
+  // Persist locally & try background sync on any change
   useEffect(() => {
-    // Always persist locally immediately
-    saveLocal(db);
-
-    // Debounced cloud write to avoid chatty network calls while typing
-    if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(async () => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    } catch {}
+    // debounce & avoid overlapping syncs
+    const t = setTimeout(async () => {
+      if (savingRef.current) return;
+      savingRef.current = true;
       try {
-        const merged = await sync(loadLocal());
-        if (merged && typeof merged === "object") {
-          // If remote had newer pieces, merge() will include them — keep local in step
+        const merged = await sync(db);
+        // Do NOT force-replace local state with merged each time to avoid flicker
+        // Only update local copy if structure is empty and cloud has data
+        if (
+          (!db || (db.exercises?.length ?? 0) + (db.programs?.length ?? 0) + (db.log?.length ?? 0) + (db.progress?.length ?? 0) === 0) &&
+          merged &&
+          ((merged.exercises?.length ?? 0) + (merged.programs?.length ?? 0) + (merged.log?.length ?? 0) + (merged.progress?.length ?? 0) > 0)
+        ) {
           setDb(merged);
-          saveLocal(merged);
+          try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          } catch {}
         }
-      } catch (e) {
-        console.warn("Background sync failed (will retry on next change):", e?.message || e);
+      } catch (err) {
+        console.warn("Background sync failed:", err?.message || err);
+      } finally {
+        savingRef.current = false;
       }
-    }, 800);
-
-    return () => {
-      if (syncTimer.current) clearTimeout(syncTimer.current);
-    };
+    }, 400);
+    return () => clearTimeout(t);
   }, [db]);
+
+  // Temporary: allow importing a local backup so you can recover if needed
+  const onImport = async (file) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const incoming = safeParse(text, null);
+      if (!incoming) throw new Error("Invalid JSON");
+      // merge locally (newest wins handled by sync service), but set state now
+      setDb((cur) => {
+        // shallow prefer incoming if cur is empty
+        const empty =
+          (cur.exercises?.length ?? 0) +
+            (cur.programs?.length ?? 0) +
+            (cur.log?.length ?? 0) +
+            (cur.progress?.length ?? 0) ===
+          0;
+        return empty ? incoming : { ...cur, ...incoming };
+      });
+      setStatus("Imported — will sync");
+      setTimeout(() => setStatus(""), 1500);
+    } catch (e) {
+      alert("Import failed. Make sure you selected a valid JSON export.");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
-      <header className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Greg&apos;s Lifting Log</h1>
+      <header className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="text-2xl font-bold">Greg&apos;s Lifting Log</h1>
+          {status && (
+            <div className="text-xs text-zinc-300 mt-1" role="status">
+              {status}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Import only (kept for safety) */}
+          <label className="text-sm bg-zinc-800 text-zinc-200 px-3 py-1.5 rounded cursor-pointer">
+            Import Data
+            <input
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={(e) => onImport(e.target.files?.[0])}
+            />
+          </label>
+        </div>
       </header>
 
-      <T.Tabs value={tab} onValueChange={setTab}>
-        <T.TabsList className="bg-zinc-900">
-          <T.TabsTrigger value="log">Log</T.TabsTrigger>
-          <T.TabsTrigger value="progress">Progress</T.TabsTrigger>
-          <T.TabsTrigger value="program">Program</T.TabsTrigger>
-          <T.TabsTrigger value="exercises">Exercises</T.TabsTrigger>
-        </T.TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="bg-zinc-900">
+          <TabsTrigger value="log">Log</TabsTrigger>
+          <TabsTrigger value="progress">Progress</TabsTrigger>
+          <TabsTrigger value="program">Program</TabsTrigger>
+          <TabsTrigger value="exercises">Exercises</TabsTrigger>
+        </TabsList>
 
-        <T.TabsContent value="log">
+        <TabsContent value="log">
           <LogTab db={db} setDb={setDb} />
-        </T.TabsContent>
+        </TabsContent>
 
-        <T.TabsContent value="progress">
+        <TabsContent value="progress">
           <ProgressTab db={db} />
-        </T.TabsContent>
+        </TabsContent>
 
-        <T.TabsContent value="program">
+        <TabsContent value="program">
           <ProgramTab db={db} setDb={setDb} />
-        </T.TabsContent>
+        </TabsContent>
 
-        <T.TabsContent value="exercises">
+        <TabsContent value="exercises">
           <ExercisesTab db={db} setDb={setDb} />
-        </T.TabsContent>
-      </T.Tabs>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
