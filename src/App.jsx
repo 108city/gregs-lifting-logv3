@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { saveToCloud, loadFromCloud } from "./syncService";
+import { sync, saveLocalEdit } from "./syncService";
 
 // Import tabs
 import LogTab from "./tabs/LogTab";
@@ -19,7 +19,9 @@ function TabsTrigger({ value, activeTab, setActiveTab, children }) {
     <button
       onClick={() => setActiveTab(value)}
       className={`px-3 py-1 rounded ${
-        activeTab === value ? "bg-blue-500 text-white" : "bg-gray-700 text-gray-300"
+        activeTab === value
+          ? "bg-blue-500 text-white"
+          : "bg-gray-700 text-gray-300"
       }`}
     >
       {children}
@@ -31,34 +33,48 @@ function TabsContent({ value, activeTab, children }) {
 }
 
 export default function App() {
-  // === State ===
+  // === State management ===
   const [db, setDb] = useState(() => {
     try {
       const local = localStorage.getItem("gregs-lifting-log");
-      return local ? JSON.parse(local) : { programs: [], exercises: [], log: [], progress: [] };
+      return local
+        ? JSON.parse(local)
+        : { workouts: [], exercises: [], programs: [], log: [], progress: [] };
     } catch {
-      return { programs: [], exercises: [], log: [], progress: [] };
+      return { workouts: [], exercises: [], programs: [], log: [], progress: [] };
     }
   });
 
   const [activeTab, setActiveTab] = useState("log");
 
-  // 🔄 Load from Supabase when app starts
+  // 🔄 Sync with Supabase on app start
   useEffect(() => {
     async function init() {
-      const cloudDb = await loadFromCloud();
-      if (cloudDb) {
-        setDb(cloudDb);
-        localStorage.setItem("gregs-lifting-log", JSON.stringify(cloudDb));
+      try {
+        const merged = await sync(db);
+        if (merged) {
+          setDb(merged);
+          localStorage.setItem("gregs-lifting-log", JSON.stringify(merged));
+        }
+      } catch (err) {
+        console.error("Cloud sync failed on init:", err.message);
       }
     }
     init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 💾 Save to localStorage + Supabase whenever db changes
+  // 💾 Save changes locally + cloud
   useEffect(() => {
-    localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
-    saveToCloud(db);
+    async function persist() {
+      try {
+        localStorage.setItem("gregs-lifting-log", JSON.stringify(db));
+        await sync(db);
+      } catch (err) {
+        console.error("❌ Sync failed, saved local only:", err.message);
+      }
+    }
+    persist();
   }, [db]);
 
   // === UI ===
@@ -95,43 +111,6 @@ export default function App() {
           <ExercisesTab db={db} setDb={setDb} />
         </TabsContent>
       </Tabs>
-
-      {/* Backup Export/Import */}
-      <div className="mt-6 space-x-2">
-        <button
-          onClick={() => {
-            const blob = new Blob([JSON.stringify(db)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "gregs-lifting-log.json";
-            a.click();
-          }}
-          className="bg-blue-500 text-white px-4 py-2 rounded"
-        >
-          Export Data
-        </button>
-
-        <input
-          type="file"
-          accept="application/json"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              try {
-                const imported = JSON.parse(event.target.result);
-                setDb(imported);
-              } catch {
-                alert("Invalid file format");
-              }
-            };
-            reader.readAsText(file);
-          }}
-          className="text-white"
-        />
-      </div>
     </div>
   );
 }
