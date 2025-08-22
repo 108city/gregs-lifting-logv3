@@ -25,16 +25,6 @@ const weeksBetween = (startIso, endIso = todayIso()) => {
   }
 };
 
-// tiny helpers to color rating labels
-const ratingClasses = (r) =>
-  r === "easy"
-    ? "text-green-500"
-    : r === "moderate"
-    ? "text-orange-400"
-    : r === "hard"
-    ? "text-red-500"
-    : "text-zinc-400";
-
 const ratingBtnClasses = (active, color) =>
   `px-2 py-1 rounded text-sm ${
     active
@@ -106,7 +96,7 @@ export default function LogTab({ db, setDb }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(day), activeProgram?.id, date, JSON.stringify(db.log)]);
 
-  // last session for "Last: ..." line + last rating display
+  // last session for “Last: …” per-set info
   const lastSession = useMemo(() => {
     if (!activeProgram || !day) return null;
     return (db.log || [])
@@ -223,10 +213,6 @@ export default function LogTab({ db, setDb }) {
             const prevEntry = lastSession?.entries?.find(
               (e) => e.exerciseId === entry.exerciseId
             );
-            const lastRatingLabel = prevEntry?.rating
-              ? prevEntry.rating[0].toUpperCase() + prevEntry.rating.slice(1)
-              : null;
-            const lastRatingClass = ratingClasses(prevEntry?.rating || "");
 
             return (
               <div key={entry.id} className="rounded border border-zinc-700">
@@ -243,11 +229,6 @@ export default function LogTab({ db, setDb }) {
                         return `${sets} × ${reps}`;
                       })()}
                     </div>
-                    {lastRatingLabel && (
-                      <div className="text-xs">
-                        Last rating: <span className={lastRatingClass}>{lastRatingLabel}</span>
-                      </div>
-                    )}
                   </div>
 
                   {/* rating buttons */}
@@ -280,37 +261,43 @@ export default function LogTab({ db, setDb }) {
                   {entry.sets.map((s, idx) => {
                     const prevSet = prevEntry?.sets?.[idx];
                     return (
-                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
+                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center">
                         <div className="text-sm text-zinc-400">Set {idx + 1}</div>
 
-                        {/* Reps input */}
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          value={String(s.reps)}
-                          onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
-                          placeholder="Reps"
-                          className="p-2 rounded bg-zinc-900 text-zinc-100"
-                        />
+                        {/* Reps input (clearly labeled) */}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Reps (first)</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={String(s.reps)}
+                            onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
+                            placeholder="Reps"
+                            className="p-2 rounded bg-zinc-900 text-zinc-100"
+                            aria-label="Reps"
+                          />
+                        </div>
 
-                        {/* Weight input */}
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step="0.5"
-                          value={String(s.kg)}
-                          onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
-                          placeholder="Weight (kg)"
-                          className="p-2 rounded bg-zinc-900 text-zinc-100"
-                        />
+                        {/* Weight input (clearly labeled) */}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Weight (kg) (second)</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.5"
+                            value={String(s.kg)}
+                            onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
+                            placeholder="Weight (kg)"
+                            className="p-2 rounded bg-zinc-900 text-zinc-100"
+                            aria-label="Weight in kilograms"
+                          />
+                        </div>
 
                         {/* Last time */}
                         <div className="text-xs text-zinc-400">
-                          {prevSet
-                            ? `Last: ${prevSet.reps} reps @ ${prevSet.kg} kg`
-                            : "—"}
+                          {prevSet ? `Last: ${prevSet.reps} reps @ ${prevSet.kg} kg` : "—"}
                         </div>
                       </div>
                     );
