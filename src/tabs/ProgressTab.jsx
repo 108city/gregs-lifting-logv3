@@ -1,5 +1,6 @@
 // src/tabs/ProgressTab.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import ReactDOM from "react-dom";
 import {
   ResponsiveContainer,
   LineChart,
@@ -95,181 +96,240 @@ function dayNumberLabel(w, programs) {
   return idx >= 0 ? `Day ${idx + 1}` : "Day ?";
 }
 
-/* ───────────────────────── Edit Modal ───────────────────────── */
+/* ───────────────────────── Safe Portal Modal ───────────────────────── */
+function Portal({ children }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return ReactDOM.createPortal(children, document.body);
+}
+
+/* Edit Modal that cannot crash (guards + fallback viewer) */
 function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   const [draft, setDraft] = useState(workout || null);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     setDraft(workout || null);
+    setErrorMsg("");
   }, [workout]);
 
-  if (!open || !draft) return null;
+  // lock body scroll when open
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
-  // Normalize to entries[] for editing
-  const entries = useMemo(() => {
-    if (Array.isArray(draft.entries)) return draft.entries.map((e) => ({
-      exerciseId: e.exerciseId ?? e.id ?? e.exerciseName,
-      exerciseName: e.exerciseName ?? e.name ?? "Exercise",
-      rating: e.rating ?? null,
-      sets: (e.sets || []).map((s) => ({
-        reps: Number(s?.reps || 0),
-        kg: Number((s?.kg ?? s?.weight) || 0),
-        notes: s?.notes || "",
-      })),
-    }));
-    if (Array.isArray(draft.exercises)) {
-      return draft.exercises.map((ex) => ({
-        exerciseId: ex.exerciseId ?? ex.id ?? ex.name,
-        exerciseName: ex.name ?? ex.exerciseName ?? "Exercise",
-        rating: ex.rating ?? null,
-        sets: (ex.sets || []).map((s) => ({
-          reps: Number(s?.reps || 0),
-          kg: Number((s?.kg ?? s?.weight) || 0),
-          notes: s?.notes || "",
-        })),
-      }));
-    }
-    return [];
-  }, [draft]);
+  if (!open) return null;
+
+  // Build editable entries with hard guards
+  let entries = [];
+  try {
+    const src = draft || workout || {};
+    const raw =
+      Array.isArray(src?.entries) && src.entries.length
+        ? src.entries.map((e) => ({
+            exerciseId: e?.exerciseId ?? e?.id ?? e?.exerciseName ?? "ex",
+            exerciseName: e?.exerciseName ?? e?.name ?? "Exercise",
+            rating: e?.rating ?? null,
+            sets: Array.isArray(e?.sets)
+              ? e.sets.map((s) => ({
+                  reps: Number(s?.reps || 0),
+                  kg: Number((s?.kg ?? s?.weight) || 0),
+                  notes: s?.notes || "",
+                }))
+              : [],
+          }))
+        : Array.isArray(src?.exercises) && src.exercises.length
+        ? src.exercises.map((ex) => ({
+            exerciseId: ex?.exerciseId ?? ex?.id ?? ex?.name ?? "ex",
+            exerciseName: ex?.name ?? ex?.exerciseName ?? "Exercise",
+            rating: ex?.rating ?? null,
+            sets: Array.isArray(ex?.sets)
+              ? ex.sets.map((s) => ({
+                  reps: Number(s?.reps || 0),
+                  kg: Number((s?.kg ?? s?.weight) || 0),
+                  notes: s?.notes || "",
+                }))
+              : [],
+          }))
+        : [];
+    entries = raw;
+  } catch (e) {
+    console.error("[EditWorkoutModal] entries-build error:", e?.message || e);
+    setErrorMsg(e?.message || String(e));
+    entries = [];
+  }
 
   const setEntryRating = (i, rating) => {
     setDraft((d) => {
-      const copy = { ...d, entries: entries.map((e) => ({ ...e })) };
+      const base = d || workout || {};
+      const copy = { ...base, entries: (entries || []).map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s })) })) };
       copy.entries[i].rating = copy.entries[i].rating === rating ? null : rating;
       return copy;
     });
   };
   const setEntrySet = (i, j, patch) => {
     setDraft((d) => {
-      const copy = {
-        ...d,
-        entries: entries.map((e) => ({
-          ...e,
-          sets: e.sets.map((s) => ({ ...s })),
-        })),
-      };
+      const base = d || workout || {};
+      const copy = { ...base, entries: (entries || []).map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s })) })) };
       copy.entries[i].sets[j] = { ...copy.entries[i].sets[j], ...patch };
       return copy;
     });
   };
 
   const handleSave = () => {
-    const normalized = {
-      ...draft,
-      entries: entries.map((e) => ({
-        exerciseId: e.exerciseId,
-        exerciseName: e.exerciseName,
-        rating: e.rating ?? null,
-        sets: e.sets.map((s) => ({
-          reps: Number(s?.reps || 0),
-          kg: Number(s?.kg || 0),
-          notes: s?.notes || "",
+    try {
+      const base = draft || workout || {};
+      const normalized = {
+        ...base,
+        entries: (entries || []).map((e) => ({
+          exerciseId: e.exerciseId,
+          exerciseName: e.exerciseName,
+          rating: e.rating ?? null,
+          sets: e.sets.map((s) => ({
+            reps: Number(s?.reps || 0),
+            kg: Number(s?.kg || 0),
+            notes: s?.notes || "",
+          })),
         })),
-      })),
-    };
-    onSave?.(normalized);
+      };
+      onSave?.(normalized);
+    } catch (e) {
+      console.error("[EditWorkoutModal] normalize error:", e?.message || e);
+      setErrorMsg(e?.message || String(e));
+    }
   };
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl"
-      >
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-lg font-semibold">
-              {formatShortDate(draft)} • {morningOrEvening(draft)} • {dayNumberLabel(draft, programs)}
-            </h3>
-            <p className="text-xs text-gray-500">Edit reps/kg and rating. Save to update history.</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-          >
-            Close
-          </button>
-        </div>
+  const headerTitle = (() => {
+    try {
+      return `${formatShortDate(draft || workout)} • ${morningOrEvening(draft || workout)} • ${dayNumberLabel(
+        draft || workout,
+        programs
+      )}`;
+    } catch {
+      return "Workout";
+    }
+  })();
 
-        <div className="space-y-4">
-          {entries.map((e, ei) => (
-            <div key={`${e.exerciseId}-${ei}`} className="rounded-xl border border-gray-200">
-              <div className="flex items-center justify-between gap-2 p-3">
-                <div className="font-medium">{e.exerciseName}</div>
-                <div className="flex items-center gap-1">
-                  <button
-                    className={`px-2 py-1 rounded text-xs ${e.rating === "easy" ? "bg-green-600 text-white" : "bg-gray-100"}`}
-                    onClick={() => setEntryRating(ei, "easy")}
-                  >
-                    Easy
-                  </button>
-                  <button
-                    className={`px-2 py-1 rounded text-xs ${e.rating === "moderate" ? "bg-orange-400 text-black" : "bg-gray-100"}`}
-                    onClick={() => setEntryRating(ei, "moderate")}
-                  >
-                    Moderate
-                  </button>
-                  <button
-                    className={`px-2 py-1 rounded text-xs ${e.rating === "hard" ? "bg-red-600 text-white" : "bg-gray-100"}`}
-                    onClick={() => setEntryRating(ei, "hard")}
-                  >
-                    Hard
-                  </button>
-                </div>
-              </div>
-              <div className="border-t border-gray-200 p-3 space-y-2">
-                {e.sets.map((s, si) => (
-                  <div key={si} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
-                    <div className="text-xs text-gray-500">Set {si + 1}</div>
-                    <div className="md:col-span-2">
-                      <label className="text-xs text-gray-500">Reps</label>
-                      <input
-                        type="number"
-                        value={String(s.reps)}
-                        min={0}
-                        onChange={(ev) => setEntrySet(ei, si, { reps: Number(ev.target.value || 0) })}
-                        className="w-full rounded border border-gray-300 px-2 py-1"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="text-xs text-gray-500">Weight (kg)</label>
-                      <input
-                        type="number"
-                        value={String(s.kg)}
-                        min={0}
-                        step="0.5"
-                        onChange={(ev) => setEntrySet(ei, si, { kg: Number(ev.target.value || 0) })}
-                        className="w-full rounded border border-gray-300 px-2 py-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500">Notes</label>
-                      <input
-                        type="text"
-                        value={s.notes || ""}
-                        onChange={(ev) => setEntrySet(ei, si, { notes: ev.target.value })}
-                        className="w-full rounded border border-gray-300 px-2 py-1"
-                      />
+  // Render via Portal to avoid stacking issues
+  return (
+    <Portal>
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl"
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-lg font-semibold">{headerTitle}</h3>
+              <p className="text-xs text-gray-500">Edit reps/kg and rating. Save to update history.</p>
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+
+          {errorMsg ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              Something went wrong rendering this workout. You can still see the raw data below.
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-red-900">
+{JSON.stringify(workout, null, 2)}
+              </pre>
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+              This workout has no editable entries/sets.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {entries.map((e, ei) => (
+                <div key={`${e.exerciseId}-${ei}`} className="rounded-xl border border-gray-200">
+                  <div className="flex items-center justify-between gap-2 p-3">
+                    <div className="font-medium">{e.exerciseName}</div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        className={`px-2 py-1 rounded text-xs ${e.rating === "easy" ? "bg-green-600 text-white" : "bg-gray-100"}`}
+                        onClick={() => setEntryRating(ei, "easy")}
+                      >
+                        Easy
+                      </button>
+                      <button
+                        className={`px-2 py-1 rounded text-xs ${e.rating === "moderate" ? "bg-orange-400 text-black" : "bg-gray-100"}`}
+                        onClick={() => setEntryRating(ei, "moderate")}
+                      >
+                        Moderate
+                      </button>
+                      <button
+                        className={`px-2 py-1 rounded text-xs ${e.rating === "hard" ? "bg-red-600 text-white" : "bg-gray-100"}`}
+                        onClick={() => setEntryRating(ei, "hard")}
+                      >
+                        Hard
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
+                  <div className="border-t border-gray-200 p-3 space-y-2">
+                    {e.sets.map((s, si) => (
+                      <div key={si} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
+                        <div className="text-xs text-gray-500">Set {si + 1}</div>
+                        <div className="md:col-span-2">
+                          <label className="text-xs text-gray-500">Reps</label>
+                          <input
+                            type="number"
+                            value={String(s.reps)}
+                            min={0}
+                            onChange={(ev) => setEntrySet(ei, si, { reps: Number(ev.target.value || 0) })}
+                            className="w-full rounded border border-gray-300 px-2 py-1"
+                          />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="text-xs text-gray-500">Weight (kg)</label>
+                          <input
+                            type="number"
+                            value={String(s.kg)}
+                            min={0}
+                            step="0.5"
+                            onChange={(ev) => setEntrySet(ei, si, { kg: Number(ev.target.value || 0) })}
+                            className="w-full rounded border border-gray-300 px-2 py-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500">Notes</label>
+                          <input
+                            type="text"
+                            value={s.notes || ""}
+                            onChange={(ev) => setEntrySet(ei, si, { notes: ev.target.value })}
+                            className="w-full rounded border border-gray-300 px-2 py-1"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
 
-        <div className="mt-4 flex justify-end">
-          <button
-            onClick={handleSave}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-          >
-            Save changes
-          </button>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={handleSave}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+            >
+              Save changes
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Portal>
   );
 }
 
@@ -392,7 +452,7 @@ function RecentWorkoutsCloud({ programs, setDb }) {
                 </div>
               </div>
 
-              {/* Inline fallback details (in case modal gets blocked by some CSS elsewhere) */}
+              {/* Inline fallback details (always safe) */}
               {expandedId === key && (
                 <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
                   {getExercisesFromWorkout(w).map((ex, i) => (
@@ -414,7 +474,7 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         })}
       </div>
 
-      {/* Modal (primary UI) */}
+      {/* Modal (primary UI, via Portal) */}
       <EditWorkoutModal
         open={!!selected}
         onClose={() => setSelected(null)}
@@ -569,7 +629,7 @@ export default function ProgressTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* Last 5 Saved Workouts (cloud) with View more → editable modal + inline fallback */}
+      {/* Last 5 Saved Workouts (cloud) with View more → modal + inline fallback */}
       <RecentWorkoutsCloud programs={programs} setDb={setDb} />
     </div>
   );
