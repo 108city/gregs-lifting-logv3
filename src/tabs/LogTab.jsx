@@ -1,6 +1,10 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
+import { supabase } from "../supabaseClient.js"; // <-- make sure this path exists in your project
 
+/* ────────────────────────────────────────────────────────────────────────────
+   Utilities (unchanged)
+   ────────────────────────────────────────────────────────────────────────────*/
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
 const clampInt = (v, min, max) => {
@@ -36,10 +40,8 @@ const ratingBtnClasses = (active, color) =>
       : "bg-zinc-800 text-zinc-200"
   }`;
 
-/**
- * Build a working session for the UI from the active program/day + last session.
- * Auto-fills reps from program, kg from last time on this day, and auto-selects last rating.
- */
+/* Build a working session for the UI from the active program/day + last session.
+   Auto-fills reps from program, kg from last time on this day, and auto-selects last rating. */
 function seedWorking(db, program, day, date) {
   if (!program || !day) return { date, entries: [] };
 
@@ -71,9 +73,9 @@ function seedWorking(db, program, day, date) {
   };
 }
 
-/* ===============================
-   Emoji celebration (no deps)
-   =============================== */
+/* ────────────────────────────────────────────────────────────────────────────
+   Emoji celebration (no dependencies)
+   ────────────────────────────────────────────────────────────────────────────*/
 function EmojiBurst({ runKey, duration = 1100, count = 34 }) {
   const containerRef = useRef(null);
   const emojis = ["🎉", "💪", "🔥", "⭐", "🏋️", "👏", "⚡"];
@@ -100,7 +102,7 @@ function EmojiBurst({ runKey, duration = 1100, count = 34 }) {
       el.appendChild(span);
 
       const vx = (Math.random() - 0.5) * 60; // px/s sideways
-      const vy = 120 + Math.random() * 160; // px/s up
+      const vy = 120 + Math.random() * 160;   // px/s up
       items.push({ node: span, vx, vy, x: 0, y: 0 });
     }
 
@@ -183,8 +185,9 @@ function CelebrationModal({ open, onClose, workoutDate, entriesCount, setsCount,
   );
 }
 
-/* =============================== */
-
+/* ────────────────────────────────────────────────────────────────────────────
+   Main LogTab
+   ────────────────────────────────────────────────────────────────────────────*/
 export default function LogTab({ db, setDb }) {
   const programs = db.programs || [];
   const activeProgram =
@@ -218,7 +221,7 @@ export default function LogTab({ db, setDb }) {
       .sort((a, b) => b.date.localeCompare(a.date))[0];
   }, [db.log, activeProgram?.id, day?.id, date]);
 
-  // celebration state
+  // celebration + sync state
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationMeta, setCelebrationMeta] = useState({ date: "", entries: 0, sets: 0 });
   const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | fail
@@ -245,37 +248,9 @@ export default function LogTab({ db, setDb }) {
       ),
     }));
 
-  // Persist to cloud (try your syncService.saveToCloud; fallback to Supabase)
-  async function persistToCloud(nextDb) {
-    // Try project's syncService first
-    try {
-      const m = await import("../syncService.js");
-      if (m && typeof m.saveToCloud === "function") {
-        await m.saveToCloud(nextDb);
-        return true;
-      }
-    } catch {
-      // ignore, fallback below
-    }
-    // Fallback: upsert to Supabase table `lifting_logs`, row id='main'
-    try {
-      const { supabase } = await import("../supabaseClient.js");
-      // If your table or schema differs, tweak here:
-      const { error } = await supabase
-        .from("lifting_logs")
-        .upsert([{ id: "main", data: nextDb }], { onConflict: "id" });
-      if (error) throw error;
-      return true;
-    } catch (e) {
-      console.error("[LogTab] Cloud save failed:", e?.message || e);
-      return false;
-    }
-  }
-
-  const saveSession = async () => {
-    if (!activeProgram || !day) return;
-
-    const normalized = {
+  /* STEP 1: Build the normalized session object to save */
+  function buildNormalized() {
+    return {
       id: genId(),
       date,
       programId: activeProgram.id,
@@ -290,34 +265,62 @@ export default function LogTab({ db, setDb }) {
         })),
       })),
     };
+  }
 
+  /* STEP 2: Merge into local db.log (so UI updates instantly) */
+  function mergeIntoLocalLog(sessionObj) {
     const existingIdx = (db.log || []).findIndex(
-      (s) => s.date === date && s.programId === activeProgram.id && s.dayId === day.id
+      (s) => s.date === sessionObj.date && s.programId === sessionObj.programId && s.dayId === sessionObj.dayId
     );
-
     const nextLog =
       existingIdx >= 0
-        ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
-        : [...(db.log || []), normalized];
+        ? (db.log || []).map((s, i) => (i === existingIdx ? sessionObj : s))
+        : [...(db.log || []), sessionObj];
+    return { ...db, log: nextLog };
+  }
 
-    const nextDb = { ...db, log: nextLog };
+  /* STEP 3: Persist ONLY { log: [...] } to Supabase -> lifting_logs[id='main'].data */
+  async function persistToCloudLogArray(nextDb) {
+    try {
+      console.log("[LogTab] Upserting to Supabase → lifting_logs(main).data.log (items):", nextDb.log?.length ?? 0);
+      const { error } = await supabase
+        .from("lifting_logs")
+        .upsert([{ id: "main", data: { log: nextDb.log } }], { onConflict: "id" });
+      if (error) {
+        console.error("[LogTab] Supabase upsert error:", error.message);
+        return false;
+      }
+      console.log("[LogTab] Cloud save OK");
+      return true;
+    } catch (e) {
+      console.error("[LogTab] Cloud save failed:", e?.message || e);
+      return false;
+    }
+  }
 
-    // 1) Save locally (immediate UX)
+  /* STEP 4: Save handler */
+  const saveSession = async () => {
+    if (!activeProgram || !day) return;
+
+    const normalized = buildNormalized();
+    const nextDb = mergeIntoLocalLog(normalized);
+
+    // Update local immediately
     setDb(nextDb);
 
-    // 2) Trigger celebration immediately
+    // Celebration popup
     const entriesCount = normalized.entries.length;
     const setsCount = normalized.entries.reduce((acc, e) => acc + (e.sets?.length || 0), 0);
     setCelebrationMeta({ date: normalized.date, entries: entriesCount, sets: setsCount });
     setSyncStatus("syncing");
     setShowCelebration(true);
 
-    // 3) Sync to cloud in background
-    const ok = await persistToCloud(nextDb);
+    // Persist to cloud (ONLY { log: [...] })
+    const ok = await persistToCloudLogArray(nextDb);
     setSyncStatus(ok ? "ok" : "fail");
   };
 
-  // ---- UI ----
+  /* ───────────────────────────── UI ───────────────────────────── */
   if (!activeProgram) {
     return (
       <div className="text-sm text-zinc-300">
