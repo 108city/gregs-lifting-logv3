@@ -1,36 +1,42 @@
 // src/syncService.js
-import { supabase } from "./supabaseClient";
+import { supabase } from "./supabaseClient.js";
+
+/**
+ * We store ONE shared row in Supabase ("main") that contains your whole app db:
+ * { programs, activeProgramId, log, ... } in data.jsonb
+ */
 
 const ROW_ID = "main";
 
-// Get the current cloud snapshot
-export async function loadFromCloud() {
+export async function loadDbFromCloud() {
   const { data, error } = await supabase
     .from("lifting_logs")
-    .select("data, updated_at")
+    .select("data")
     .eq("id", ROW_ID)
     .maybeSingle();
 
-  if (error) throw error;
-  return {
-    data: data?.data || { exercises: [], programs: [], log: [], progress: [], activeProgramId: null },
-    updatedAt: data?.updated_at || null,
-  };
+  if (error) {
+    console.error("[sync] loadDbFromCloud error:", error.message);
+    return null;
+  }
+  return data?.data || null; // returns the JSON blob or null
 }
 
-// Save a full snapshot to the cloud
-export async function saveToCloud(db) {
+export async function saveDbToCloud(db) {
+  // defensive copy + keep shape minimal & stable
+  const payload = {
+    programs: Array.isArray(db?.programs) ? db.programs : [],
+    activeProgramId: db?.activeProgramId ?? null,
+    log: Array.isArray(db?.log) ? db.log : [],
+  };
+
   const { error } = await supabase
     .from("lifting_logs")
-    .upsert({ id: ROW_ID, data: db, updated_at: new Date().toISOString() }, { onConflict: "id" });
-  if (error) throw error;
-}
+    .upsert([{ id: ROW_ID, data: payload }], { onConflict: "id" });
 
-// Small debounce to avoid spamming writes
-let saveTimer = null;
-export function saveToCloudDebounced(db, delay = 800) {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveToCloud(db).catch((e) => console.error("Supabase save failed:", e.message));
-  }, delay);
+  if (error) {
+    console.error("[sync] saveDbToCloud error:", error.message);
+    throw error;
+  }
+  return true;
 }
