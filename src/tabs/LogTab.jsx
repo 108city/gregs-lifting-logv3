@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "../supabaseClient.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Utilities (unchanged)
+   Utilities
    ────────────────────────────────────────────────────────────────────────────*/
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
@@ -215,9 +215,18 @@ export default function LogTab({ db, setDb }) {
       .sort((a, b) => b.date.localeCompare(a.date))[0];
   }, [db.log, activeProgram?.id, day?.id, date]);
 
+  // celebration + sync state
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationMeta, setCelebrationMeta] = useState({ date: "", entries: 0, sets: 0 });
   const [syncStatus, setSyncStatus] = useState("idle");
+
+  // debug panel state
+  const [cloudProbe, setCloudProbe] = useState({
+    mainCount: null,
+    deviceCount: null,
+    lastChecked: null,
+    error: null,
+  });
 
   const editSet = (entryId, setIdx, patch) =>
     setWorking((w) => ({
@@ -266,13 +275,23 @@ export default function LogTab({ db, setDb }) {
     return { ...db, log: nextLog };
   }
 
-  // Save to the device row and main row so Progress (which prefers device via syncService)
-  // and any fallback readers both see the update.
+  async function upsertRow(id, logOnly) {
+    const { data, error } = await supabase
+      .from("lifting_logs")
+      .upsert([{ id, data: logOnly }], { onConflict: "id" })
+      .select()
+      .maybeSingle(); // returns the row back
+
+    if (error) throw error;
+    return data;
+  }
+
+  // Save to both rows + call syncService if available
   async function persistToCloudAll(nextDb) {
     const logOnly = { log: nextDb.log };
     let ok = true;
 
-    // 1) Try project syncService first (if your app uses it)
+    // Try your app's syncService first (if exists)
     try {
       const m = await import("../syncService.js");
       if (m && typeof m.saveToCloud === "function") {
@@ -284,33 +303,67 @@ export default function LogTab({ db, setDb }) {
       console.warn("[LogTab] syncService.saveToCloud not available or failed:", e?.message || e);
     }
 
-    // 2) Upsert 'main'
     try {
-      console.log("[LogTab] Upsert → lifting_logs(id='main') with data.log items:", nextDb.log?.length ?? 0);
-      const { error } = await supabase
-        .from("lifting_logs")
-        .upsert([{ id: "main", data: logOnly }], { onConflict: "id" });
-      if (error) throw error;
-      console.log("[LogTab] Upsert main → ok");
+      console.log("[LogTab] Upsert main… (items:", nextDb.log?.length ?? 0, ")");
+      const row = await upsertRow("main", logOnly);
+      console.log("[LogTab] Upsert main OK; round-trip row.data.log length:", row?.data?.log?.length ?? "n/a");
     } catch (e) {
       ok = false;
       console.error("[LogTab] Upsert main failed:", e?.message || e);
     }
 
-    // 3) Upsert 'gregs-device' (since your DB shows this row and Progress may read it)
     try {
-      console.log("[LogTab] Upsert → lifting_logs(id='gregs-device') with data.log items:", nextDb.log?.length ?? 0);
-      const { error } = await supabase
-        .from("lifting_logs")
-        .upsert([{ id: "gregs-device", data: logOnly }], { onConflict: "id" });
-      if (error) throw error;
-      console.log("[LogTab] Upsert gregs-device → ok");
+      console.log("[LogTab] Upsert gregs-device… (items:", nextDb.log?.length ?? 0, ")");
+      const row = await upsertRow("gregs-device", logOnly);
+      console.log("[LogTab] Upsert gregs-device OK; round-trip row.data.log length:", row?.data?.log?.length ?? "n/a");
     } catch (e) {
-      // Not fatal if this row isn't used, but log it for clarity
+      // not fatal if this row isn't used
       console.warn("[LogTab] Upsert gregs-device failed (ok if row unused):", e?.message || e);
     }
 
     return ok;
+  }
+
+  // Manual check button — reads both rows and shows counts
+  async function checkSupabase() {
+    try {
+      const { data: main, error: e1 } = await supabase
+        .from("lifting_logs")
+        .select("id, data, updated_at")
+        .eq("id", "main")
+        .maybeSingle();
+      if (e1) throw e1;
+
+      const { data: device, error: e2 } = await supabase
+        .from("lifting_logs")
+        .select("id, data, updated_at")
+        .eq("id", "gregs-device")
+        .maybeSingle();
+      if (e2) throw e2;
+
+      const mCount = main?.data?.log?.length ?? 0;
+      const dCount = device?.data?.log?.length ?? 0;
+
+      console.log("[LogTab] Probe main →", main);
+      console.log("[LogTab] Probe gregs-device →", device);
+      if (mCount) console.log("[LogTab] First main log item:", main.data.log[0]);
+      if (dCount) console.log("[LogTab] First device log item:", device.data.log[0]);
+
+      setCloudProbe({
+        mainCount: mCount,
+        deviceCount: dCount,
+        lastChecked: new Date().toLocaleTimeString(),
+        error: null,
+      });
+    } catch (err) {
+      console.error("[LogTab] Probe error:", err?.message || err);
+      setCloudProbe({
+        mainCount: null,
+        deviceCount: null,
+        lastChecked: new Date().toLocaleTimeString(),
+        error: err?.message || String(err),
+      });
+    }
   }
 
   const saveSession = async () => {
@@ -487,6 +540,37 @@ export default function LogTab({ db, setDb }) {
           </div>
         </div>
       )}
+
+      {/* Debug panel */}
+      <div className="rounded border border-zinc-700 p-3 text-sm text-zinc-300">
+        <div className="flex items-center justify-between">
+          <div className="font-medium">Debug: Supabase</div>
+          <button
+            onClick={checkSupabase}
+            className="px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+          >
+            Check Supabase
+          </button>
+        </div>
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="rounded bg-zinc-900 p-2">
+            <div className="text-xs text-zinc-400">Local log count</div>
+            <div className="text-lg">{db?.log?.length ?? 0}</div>
+          </div>
+          <div className="rounded bg-zinc-900 p-2">
+            <div className="text-xs text-zinc-400">cloud main (data.log)</div>
+            <div className="text-lg">{cloudProbe.mainCount ?? "—"}</div>
+          </div>
+          <div className="rounded bg-zinc-900 p-2">
+            <div className="text-xs text-zinc-400">cloud gregs-device (data.log)</div>
+            <div className="text-lg">{cloudProbe.deviceCount ?? "—"}</div>
+          </div>
+        </div>
+        <div className="mt-2 text-xs text-zinc-400">
+          {cloudProbe.lastChecked ? `Last checked: ${cloudProbe.lastChecked}` : "Not checked yet."}
+          {cloudProbe.error && <div className="text-red-400 mt-1">Error: {cloudProbe.error}</div>}
+        </div>
+      </div>
 
       {/* Celebration overlay */}
       <CelebrationModal
