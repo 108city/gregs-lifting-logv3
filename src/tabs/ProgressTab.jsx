@@ -13,7 +13,6 @@ import {
   LabelList,
   LineChart,
   Scatter,
-  ScatterChart,
 } from "recharts";
 
 /* ===============================
@@ -54,31 +53,69 @@ function formatDate(d) {
 }
 
 /* ===============================
-   “Meaningful” rules (more permissive so graphs actually render)
-   - A set counts if reps>0 OR weight>0 (notes optional)
+   Compatibility layer
+   Supports both:
+   - workouts with exercises[].name, sets[].weight
+   - workouts with entries[].exerciseName, sets[].kg
    =============================== */
-function hasRealSet(s) {
-  const reps = Number(s?.reps || 0);
-  const weight = Number(s?.weight || 0);
-  return reps > 0 || weight > 0;
+
+// get an array of exercise-like objects: { name, sets }
+function getExercisesFromWorkout(w) {
+  if (!w) return [];
+  if (Array.isArray(w.exercises) && w.exercises.length) {
+    // Legacy / earlier Progress format
+    return w.exercises.map((ex) => ({
+      name: ex?.name ?? ex?.exerciseName ?? "Exercise",
+      sets: Array.isArray(ex?.sets) ? ex.sets : [],
+    }));
+  }
+  if (Array.isArray(w.entries) && w.entries.length) {
+    // New LogTab format
+    return w.entries.map((e) => ({
+      name: e?.exerciseName ?? e?.name ?? "Exercise",
+      // Convert each set to a unified { reps, weight } view (weight from kg)
+      sets: (Array.isArray(e?.sets) ? e.sets : []).map((s) => ({
+        reps: Number(s?.reps || 0),
+        weight: Number(s?.kg || 0),
+        notes: s?.notes ?? "",
+      })),
+    }));
+  }
+  return [];
 }
-function isMeaningfulWorkoutLocal(w) {
-  if (!w) return false;
-  const exs = Array.isArray(w.exercises) ? w.exercises : [];
+
+// get sets array from a compatible exercise
+function getSets(ex) {
+  return Array.isArray(ex?.sets) ? ex.sets : [];
+}
+
+// check for a "real" set (reps>0 OR weight|kg>0 OR notes text)
+function hasRealSetGeneric(s) {
+  const reps = Number(s?.reps || 0);
+  // support both weight and kg naming
+  const weight = s?.weight !== undefined ? Number(s.weight || 0) : Number(s?.kg || 0);
+  const notesOk = typeof s?.notes === "string" && s.notes.trim().length > 0;
+  return reps > 0 || weight > 0 || notesOk;
+}
+
+function isMeaningfulWorkout(w) {
+  const exs = getExercisesFromWorkout(w);
   if (exs.length === 0) return false;
-  return exs.some((ex) => Array.isArray(ex?.sets) && ex.sets.some(hasRealSet));
+  return exs.some((ex) => getSets(ex).some(hasRealSetGeneric));
 }
 
 /* ===============================
-   Cloud list (Last 5 saved) — hidden if DB empty
+   Recent Cloud Workouts (inline)
+   Strict filter: meaningful only
    =============================== */
 function RecentWorkoutsCloud({ onOpen }) {
-  const [items, setItems] = useState(null); // null=loading, []=hide
+  const [items, setItems] = useState(null);
 
   useEffect(() => {
     let alive = true;
 
     async function fetchCloudLog() {
+      // Prefer syncService if present
       try {
         const m = await import("../syncService.js");
         if (m && typeof m.loadFromCloud === "function") {
@@ -88,6 +125,8 @@ function RecentWorkoutsCloud({ onOpen }) {
       } catch {
         /* ignore */
       }
+
+      // Fallback to direct Supabase (id='main')
       const { supabase } = await import("../supabaseClient.js");
       const { data, error } = await supabase
         .from("lifting_logs")
@@ -102,17 +141,23 @@ function RecentWorkoutsCloud({ onOpen }) {
       try {
         const log = await fetchCloudLog();
         if (!alive) return;
-        const cleaned = (Array.isArray(log) ? log : []).filter(isMeaningfulWorkoutLocal);
-        if (cleaned.length === 0) { setItems([]); return; }
+
+        const cleaned = (Array.isArray(log) ? log : []).filter(isMeaningfulWorkout);
+        if (cleaned.length === 0) {
+          setItems([]);
+          return;
+        }
         const sorted = [...cleaned].sort(byNewest);
         setItems(sorted.slice(0, 5));
       } catch (e) {
         console.error("[RecentWorkoutsCloud] Load failed:", e?.message || e);
-        setItems([]); // hide on error
+        setItems([]);
       }
     })();
 
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   if (!items || items.length === 0) return null;
@@ -125,11 +170,9 @@ function RecentWorkoutsCloud({ onOpen }) {
 
       <div className="grid gap-3">
         {items.map((w, idx) => {
-          const exCount = (w.exercises || []).length;
-          const setCount = (w.exercises || []).reduce(
-            (acc, e) => acc + (e.sets?.length || 0),
-            0
-          );
+          const exs = getExercisesFromWorkout(w);
+          const exCount = exs.length;
+          const setCount = exs.reduce((acc, e) => acc + getSets(e).length, 0);
           return (
             <button
               type="button"
@@ -152,6 +195,20 @@ function RecentWorkoutsCloud({ onOpen }) {
                   View
                 </div>
               </div>
+
+              {exs.slice(0, 3).map((ex, i) => (
+                <div key={i} className="mt-2 text-sm">
+                  <span className="font-medium">{ex.name}</span>
+                  <span className="text-gray-500">
+                    {" "}
+                    — {getSets(ex).filter(hasRealSetGeneric).length} real sets
+                  </span>
+                </div>
+              ))}
+
+              {exs.length > 3 && (
+                <div className="mt-1 text-xs text-gray-500">+{exs.length - 3} more…</div>
+              )}
             </button>
           );
         })}
@@ -166,13 +223,13 @@ function RecentWorkoutsCloud({ onOpen }) {
 export default function ProgressTab({ db, onOpenWorkout }) {
   const log = db?.log || [];
 
-  // Use permissive “meaningful” filter so charts appear
+  // Use compatibility filter so charts appear for either shape
   const filteredLog = useMemo(
-    () => (Array.isArray(log) ? log.filter(isMeaningfulWorkoutLocal) : []),
+    () => (Array.isArray(log) ? log.filter(isMeaningfulWorkout) : []),
     [log]
   );
 
-  // ---------- Build exercise progression data (bars + charts) ----------
+  // ---------- Exercise progression data (bars + charts) ----------
   const { overviewRows, perExerciseSeries } = useMemo(() => {
     // seriesMap: exercise -> { bestBySession: [{date, weight}], allSets: [{date, weight}] }
     const seriesMap = new Map();
@@ -181,18 +238,23 @@ export default function ProgressTab({ db, onOpenWorkout }) {
       const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
       if (!when) continue;
 
-      for (const ex of w.exercises || []) {
-        const realSets = (ex.sets || []).filter(hasRealSet);
+      const exercises = getExercisesFromWorkout(w);
+      for (const ex of exercises) {
+        const realSets = getSets(ex).filter(hasRealSetGeneric);
         if (realSets.length === 0) continue;
 
-        // push all sets
+        // Push ALL sets (using kg or weight)
         const entry = seriesMap.get(ex.name) || { bestBySession: [], allSets: [] };
         for (const s of realSets) {
-          entry.allSets.push({ date: when, weight: Number(s.weight || 0) });
+          const wt = s?.weight !== undefined ? Number(s.weight || 0) : Number(s?.kg || 0);
+          entry.allSets.push({ date: when, weight: wt });
         }
 
-        // compute session best
-        const bestWeight = realSets.reduce((m, s) => Math.max(m, Number(s.weight || 0)), 0);
+        // Session best = max weight for that session
+        const bestWeight = realSets.reduce((m, s) => {
+          const wt = s?.weight !== undefined ? Number(s.weight || 0) : Number(s?.kg || 0);
+          return Math.max(m, wt);
+        }, 0);
         entry.bestBySession.push({ date: when, weight: bestWeight });
 
         seriesMap.set(ex.name, entry);
@@ -223,11 +285,12 @@ export default function ProgressTab({ db, onOpenWorkout }) {
     return { overviewRows: overview, perExerciseSeries: perSeries };
   }, [filteredLog]);
 
-  // ---------- KPIs (meaningful only) ----------
+  // ---------- KPIs ----------
   const { totalWorkouts, recent7, recent30 } = useMemo(() => {
     const now = new Date();
     const total = filteredLog.length;
-    let last7 = 0, last30 = 0;
+    let last7 = 0,
+      last30 = 0;
 
     for (const w of filteredLog) {
       const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || null;
@@ -239,7 +302,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
     return { totalWorkouts: total, recent7: last7, recent30: last30 };
   }, [filteredLog]);
 
-  // ---------- Local 14-day activity (meaningful only) ----------
+  // ---------- Local 14-day activity ----------
   const trend = useMemo(() => {
     const map = new Map();
     for (const w of filteredLog) {
@@ -303,9 +366,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
                     <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                     <YAxis />
                     <Tooltip />
-                    {/* All sets as dots (scatter) */}
                     <Scatter data={s.all} name="All sets" />
-                    {/* Session best as line */}
                     <Line type="monotone" dataKey="weight" name="Session best" dot activeDot={{ r: 4 }} />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -349,7 +410,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
         </div>
       </div>
 
-      {/* Cloud-backed list (hidden if DB has no saved meaningful workouts) */}
+      {/* Cloud-backed list */}
       <RecentWorkoutsCloud onOpen={onOpenWorkout} />
     </div>
   );
