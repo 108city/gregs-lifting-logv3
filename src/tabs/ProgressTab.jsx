@@ -39,27 +39,29 @@ function formatDate(d) {
 }
 
 /* ===============================
+   Meaningful workout rules (shared)
+   =============================== */
+// A set is meaningful if BOTH reps>0 and weight>0, or notes has text
+function hasRealSet(s) {
+  const reps = Number(s?.reps || 0);
+  const weight = Number(s?.weight || 0);
+  const notesOk = typeof s?.notes === "string" && s.notes.trim().length > 0;
+  return (reps > 0 && weight > 0) || notesOk;
+}
+// Local/log entry meaningful check
+function isMeaningfulWorkoutLocal(w) {
+  if (!w || w.completed !== true) return false;
+  const exs = Array.isArray(w.exercises) ? w.exercises : [];
+  if (exs.length === 0) return false;
+  return exs.some((ex) => Array.isArray(ex?.sets) && ex.sets.some(hasRealSet));
+}
+
+/* ===============================
    Recent Cloud Workouts (inline)
    Strict filter: show only completed workouts with real sets.
    =============================== */
 function RecentWorkoutsCloud({ onOpen }) {
   const [items, setItems] = useState(null); // null=loading, []=none/show nothing
-
-  // A set is meaningful if BOTH reps>0 and weight>0, or notes has text
-  const hasRealSet = (s) => {
-    const reps = Number(s?.reps || 0);
-    const weight = Number(s?.weight || 0);
-    const notesOk = typeof s?.notes === "string" && s.notes.trim().length > 0;
-    return ((reps > 0 && weight > 0) || notesOk);
-  };
-
-  const hasMeaningfulWorkout = (w) => {
-    if (!w || w.completed !== true) return false; // must be completed
-    const exs = Array.isArray(w.exercises) ? w.exercises : [];
-    if (exs.length === 0) return false;
-    // At least one exercise with at least one "real" set
-    return exs.some((ex) => Array.isArray(ex?.sets) && ex.sets.some(hasRealSet));
-  };
 
   useEffect(() => {
     let alive = true;
@@ -92,14 +94,12 @@ function RecentWorkoutsCloud({ onOpen }) {
         const log = await fetchCloudLog();
         if (!alive) return;
 
-        // STRICT FILTER here
-        const cleaned = (Array.isArray(log) ? log : []).filter(hasMeaningfulWorkout);
-
+        // STRICT FILTER here (same as local stats)
+        const cleaned = (Array.isArray(log) ? log : []).filter(isMeaningfulWorkoutLocal);
         if (cleaned.length === 0) {
           setItems([]); // render nothing
           return;
         }
-
         const sorted = [...cleaned].sort(byNewest);
         setItems(sorted.slice(0, 5));
       } catch (e) {
@@ -156,7 +156,7 @@ function RecentWorkoutsCloud({ onOpen }) {
                   <span className="font-medium">{ex.name}</span>
                   <span className="text-gray-500">
                     {" "}
-                    — {(ex.sets || []).filter(s => Number(s?.reps||0)>0 && Number(s?.weight||0)>0).length} real sets
+                    — {(ex.sets || []).filter(hasRealSet).length} real sets
                   </span>
                 </div>
               ))}
@@ -180,14 +180,20 @@ function RecentWorkoutsCloud({ onOpen }) {
 export default function ProgressTab({ db, onOpenWorkout }) {
   const log = db?.log || [];
 
-  // Basic stats from local data
+  // Filter local log by the same "meaningful workout" rule
+  const filteredLog = useMemo(
+    () => (Array.isArray(log) ? log.filter(isMeaningfulWorkoutLocal) : []),
+    [log]
+  );
+
+  // Stats use ONLY meaningful workouts
   const { totalWorkouts, recent7, recent30 } = useMemo(() => {
     const now = new Date();
-    const total = log.length;
+    const total = filteredLog.length;
     let last7 = 0;
     let last30 = 0;
 
-    for (const w of log) {
+    for (const w of filteredLog) {
       const when =
         toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || null;
       if (!when) continue;
@@ -196,12 +202,12 @@ export default function ProgressTab({ db, onOpenWorkout }) {
       if (diff <= 30) last30++;
     }
     return { totalWorkouts: total, recent7: last7, recent30: last30 };
-  }, [log]);
+  }, [filteredLog]);
 
-  // Trend by ISO date (local only)
+  // Trend (also only meaningful workouts)
   const trend = useMemo(() => {
     const map = new Map();
-    for (const w of log) {
+    for (const w of filteredLog) {
       const d =
         isoDate(toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || new Date());
       map.set(d, (map.get(d) || 0) + 1);
@@ -214,7 +220,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
       out.push({ date: k, count: map.get(k) || 0 });
     }
     return out;
-  }, [log]);
+  }, [filteredLog]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4">
@@ -223,7 +229,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
         <h1 className="text-xl font-bold">Progress</h1>
       </div>
 
-      {/* KPI cards */}
+      {/* KPI cards (meaningful workouts only) */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="text-xs text-gray-500">Total Workouts</p>
@@ -239,7 +245,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
         </div>
       </div>
 
-      {/* Simple 14-day trend (textual) */}
+      {/* Simple 14-day trend (textual, filtered) */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <p className="text-sm font-medium">14-Day Activity</p>
         <div className="mt-2 flex flex-wrap gap-1">
@@ -257,7 +263,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
         </div>
       </div>
 
-      {/* Cloud-backed list: shows only if DB has real saved workouts */}
+      {/* Cloud-backed list: shows only if DB has meaningful saved workouts */}
       <RecentWorkoutsCloud onOpen={onOpenWorkout} />
     </div>
   );
