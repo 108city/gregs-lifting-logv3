@@ -1,319 +1,86 @@
-// src/tabs/LogTab.jsx
-import React, { useEffect, useMemo, useState } from "react";
+// src/components/LastWorkoutCard.tsx import React, { useMemo, useState } from "react";
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
-const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
-const clampInt = (v, min, max) => {
-  const n = parseInt(v, 10);
-  if (Number.isNaN(n)) return min;
-  return Math.max(min, Math.min(max, n));
-};
-const clampFloat = (v, min, max) => {
-  const n = parseFloat(v);
-  if (Number.isNaN(n)) return min;
-  return Math.max(min, Math.min(max, n));
-};
-const weeksBetween = (startIso, endIso = todayIso()) => {
-  try {
-    const a = new Date(startIso + "T00:00:00");
-    const b = new Date(endIso + "T00:00:00");
-    const ms = b - a;
-    if (isNaN(ms)) return 0;
-    return Math.floor(ms / (1000 * 60 * 60 * 24 * 7));
-  } catch {
-    return 0;
-  }
-};
+// --- Types kept lightweight so it works with your v1 data shape --- export type LogSet = { reps?: number; weight?: number; rpe?: number; notes?: string }; export type LogExercise = { id?: string; name?: string; sets?: LogSet[] }; export type LogWorkout = { id?: string; date?: string | number | Date; // ISO, epoch, or Date startedAt?: string; endedAt?: string; notes?: string; exercises?: LogExercise[]; };
 
-const ratingBtnClasses = (active, color) =>
-  `px-2 py-1 rounded text-sm ${
-    active
-      ? color === "green"
-        ? "bg-green-600 text-white"
-        : color === "orange"
-        ? "bg-orange-500 text-black"
-        : "bg-red-600 text-white"
-      : "bg-zinc-800 text-zinc-200"
-  }`;
+function formatDate(d?: string | number | Date) { if (!d) return "Unknown date"; const dt = typeof d === "string" || typeof d === "number" ? new Date(d) : d; if (Number.isNaN(dt.getTime())) return "Unknown date"; return dt.toLocaleString(undefined, { weekday: "short", year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", }); }
 
-/**
- * Build a working session for the UI from the active program/day + last session.
- * Auto-fills reps from program, kg from last time on this day, and auto-selects last rating.
- */
-function seedWorking(db, program, day, date) {
-  if (!program || !day) return { date, entries: [] };
+function sum(arr: number[]) { return arr.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0); }
 
-  const lastSession = (db.log || [])
-    .filter((s) => s.programId === program.id && s.dayId === day.id && s.date < date)
-    .sort((a, b) => b.date.localeCompare(a.date))[0];
+function getWorkoutStats(w?: LogWorkout) { const ex = w?.exercises || []; const setCounts = ex.map(e => e.sets?.length || 0); const totalSets = sum(setCounts); const totalVolume = sum( ex.flatMap(e => (e.sets || []).map(s => (s.weight || 0) * (s.reps || 0))) ); return { exercises: ex.length, sets: totalSets, volume: totalVolume }; }
 
-  return {
-    date,
-    programId: program.id,
-    dayId: day.id,
-    entries: (day.items || []).map((it) => {
-      const prevEntry = lastSession?.entries?.find((e) => e.exerciseId === it.exerciseId);
-      const sets = Array.from({ length: clampInt(it.sets ?? 1, 1, 100) }, (_, i) => ({
-        reps: String(clampInt(it.reps ?? 1, 1, 100)),
-        kg:
-          prevEntry?.sets?.[i]?.kg !== undefined && prevEntry?.sets?.[i]?.kg !== null
-            ? String(prevEntry.sets[i].kg)
-            : "",
-      }));
-      return {
-        id: genId(),
-        exerciseId: it.exerciseId,
-        exerciseName: it.name,
-        rating: prevEntry?.rating ?? null, // auto-select last time’s rating
-        sets,
-      };
-    }),
-  };
-}
+export interface LastWorkoutCardProps { log?: LogWorkout[]; onOpen?: (workout: LogWorkout) => void; // optional parent handler to open a full view }
 
-export default function LogTab({ db, setDb }) {
-  const programs = db.programs || [];
-  const activeProgram =
-    programs.find((p) => p.id === db.activeProgramId) || programs[0] || null;
+const EmptyState: React.FC = () => (
 
-  const [date, setDate] = useState(todayIso());
-  const dayList = activeProgram?.days || [];
-  const [dayId, setDayId] = useState(dayList[0]?.id || "");
-
-  useEffect(() => {
-    if (dayList.length && !dayList.find((d) => d.id === dayId)) {
-      setDayId(dayList[0].id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProgram?.id]);
-
-  const day = dayList.find((d) => d.id === dayId) || null;
-
-  // Build working state from program/day + last session
-  const [working, setWorking] = useState(() => seedWorking(db, activeProgram, day, date));
-  useEffect(() => {
-    setWorking(seedWorking(db, activeProgram, day, date));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(day), activeProgram?.id, date, JSON.stringify(db.log)]);
-
-  // last session for “Last: …” per-set info
-  const lastSession = useMemo(() => {
-    if (!activeProgram || !day) return null;
-    return (db.log || [])
-      .filter((s) => s.programId === activeProgram.id && s.dayId === day.id && s.date < date)
-      .sort((a, b) => b.date.localeCompare(a.date))[0];
-  }, [db.log, activeProgram?.id, day?.id, date]);
-
-  // --- editing helpers ---
-  const editSet = (entryId, setIdx, patch) =>
-    setWorking((w) => ({
-      ...w,
-      entries: w.entries.map((e) =>
-        e.id === entryId
-          ? {
-              ...e,
-              sets: e.sets.map((s, i) => (i === setIdx ? { ...s, ...patch } : s)),
-            }
-          : e
-      ),
-    }));
-
-  const setRating = (entryId, rating) =>
-    setWorking((w) => ({
-      ...w,
-      entries: w.entries.map((e) =>
-        e.id === entryId ? { ...e, rating: e.rating === rating ? null : rating } : e
-      ),
-    }));
-
-  const saveSession = () => {
-    if (!activeProgram || !day) return;
-
-    const normalized = {
-      id: genId(),
-      date,
-      programId: activeProgram.id,
-      dayId: day.id,
-      entries: working.entries.map((e) => ({
-        exerciseId: e.exerciseId,
-        exerciseName: e.exerciseName,
-        rating: e.rating ?? null,
-        sets: e.sets.map((s) => ({
-          reps: clampInt(String(s.reps || "0"), 0, 10000),
-          kg: clampFloat(String(s.kg || "0"), 0, 100000),
-        })),
-      })),
-    };
-
-    const existingIdx = (db.log || []).findIndex(
-      (s) => s.date === date && s.programId === activeProgram.id && s.dayId === day.id
-    );
-
-    const nextLog =
-      existingIdx >= 0
-        ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
-        : [...(db.log || []), normalized];
-
-    setDb({ ...db, log: nextLog });
-  };
-
-  // ---- UI ----
-  if (!activeProgram) {
-    return (
-      <div className="text-sm text-zinc-300">
-        No active program. Create one in the Program tab and set it active.
+  <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="flex items-center gap-3">
+      <div className="h-10 w-10 rounded-full bg-gray-100" />
+      <div>
+        <p className="text-sm text-gray-500">Last workout</p>
+        <p className="text-base font-medium">No workouts found</p>
       </div>
-    );
-  }
+    </div>
+    <p className="mt-3 text-sm text-gray-500">
+      Start logging a workout and it will appear here.
+    </p>
+  </div>
+);export const LastWorkoutCard: React.FC<LastWorkoutCardProps> = ({ log }) => { const [expanded, setExpanded] = useState(false);
 
-  return (
-    <div className="space-y-4">
-      {/* Header: program + weeks */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="text-lg font-semibold">{activeProgram.name}</div>
-        <div className="text-xs text-zinc-400">
-          Started {activeProgram.startDate || "—"} · Week{" "}
-          {weeksBetween(activeProgram.startDate) + 1}
-        </div>
-      </div>
+const last = useMemo(() => { if (!log || log.length === 0) return undefined; // pick the workout with the latest date/startedAt const withKeys = log.map(w => ({ w, key: new Date(w.date || w.endedAt || w.startedAt || 0).getTime(), })); withKeys.sort((a, b) => b.key - a.key); return withKeys[0].w; }, [log]);
 
-      {/* Date + Day pickers */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="space-y-1">
-          <label className="text-sm text-zinc-300">Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value || todayIso())}
-            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
-          />
-        </div>
-        <div className="space-y-1 sm:col-span-2">
-          <label className="text-sm text-zinc-300">Training Day</label>
-          <select
-            value={dayId}
-            onChange={(e) => setDayId(e.target.value)}
-            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
-          >
-            {dayList.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+if (!last) return <EmptyState />;
 
-      {/* Entries */}
-      {!day || (working.entries || []).length === 0 ? (
-        <div className="text-sm text-zinc-400">This day has no programmed exercises yet.</div>
-      ) : (
-        <div className="space-y-4">
-          {working.entries.map((entry) => {
-            const prevEntry = lastSession?.entries?.find(
-              (e) => e.exerciseId === entry.exerciseId
-            );
+const stats = getWorkoutStats(last);
 
-            return (
-              <div key={entry.id} className="rounded border border-zinc-700">
-                <div className="p-3 flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <div className="font-medium">{entry.exerciseName}</div>
-                    <div className="text-xs text-zinc-400">
-                      Target:{" "}
-                      {(() => {
-                        // find programmed sets x reps from day
-                        const programmed = day.items.find((it) => it.exerciseId === entry.exerciseId);
-                        const sets = programmed?.sets ?? entry.sets?.length ?? 0;
-                        const reps = programmed?.reps ?? (entry.sets?.[0]?.reps ? Number(entry.sets[0].reps) : 0);
-                        return `${sets} × ${reps}`;
-                      })()}
-                    </div>
-                  </div>
+return ( <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"> <div className="flex items-start justify-between gap-4"> <div> <p className="text-sm text-gray-500">Last workout</p> <h3 className="text-lg font-semibold leading-tight">{formatDate(last.date || last.endedAt || last.startedAt)}</h3> <p className="mt-1 text-sm text-gray-500"> {stats.exercises} exercise{stats.exercises === 1 ? "" : "s"} · {stats.sets} set{stats.sets === 1 ? "" : "s"} {stats.volume ?  · ${Intl.NumberFormat().format(stats.volume)} kg·reps : ""} </p> </div> <button onClick={() => setExpanded(v => !v)} className="rounded-xl px-3 py-2 text-sm font-medium hover:bg-gray-50 border border-gray-200" > {expanded ? "Hide details" : "View details"} </button> </div>
 
-                  {/* rating buttons */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      className={ratingBtnClasses(entry.rating === "easy", "green")}
-                      onClick={() => setRating(entry.id, "easy")}
-                      title="Felt easy — go up next time"
-                    >
-                      Easy
-                    </button>
-                    <button
-                      className={ratingBtnClasses(entry.rating === "moderate", "orange")}
-                      onClick={() => setRating(entry.id, "moderate")}
-                      title="Felt okay — hold next time"
-                    >
-                      Moderate
-                    </button>
-                    <button
-                      className={ratingBtnClasses(entry.rating === "hard", "red")}
-                      onClick={() => setRating(entry.id, "hard")}
-                      title="Felt hard — go down next time"
-                    >
-                      Hard
-                    </button>
-                  </div>
-                </div>
-
-                <div className="border-t border-zinc-700 p-3 space-y-2">
-                  {entry.sets.map((s, idx) => {
-                    const prevSet = prevEntry?.sets?.[idx];
-                    return (
-                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center">
-                        <div className="text-sm text-zinc-400">Set {idx + 1}</div>
-
-                        {/* Reps input (clearly labeled) */}
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs text-zinc-400">Reps</span>
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            min={0}
-                            value={String(s.reps)}
-                            onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
-                            placeholder="Reps"
-                            className="p-2 rounded bg-zinc-900 text-zinc-100"
-                            aria-label="Reps"
-                          />
-                        </div>
-
-                        {/* Weight input (clearly labeled) */}
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs text-zinc-400">Weight (kg)</span>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min={0}
-                            step="0.5"
-                            value={String(s.kg)}
-                            onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
-                            placeholder="Weight (kg)"
-                            className="p-2 rounded bg-zinc-900 text-zinc-100"
-                            aria-label="Weight in kilograms"
-                          />
-                        </div>
-
-                        {/* Last time */}
-                        <div className="text-xs text-zinc-400">
-                          {prevSet ? `Last: ${prevSet.reps} reps @ ${prevSet.kg} kg` : "—"}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-
-          <div className="flex justify-end">
-            <button onClick={saveSession} className="px-4 py-2 rounded bg-blue-600 text-white">
-              Save
-            </button>
+{expanded && (
+    <div className="mt-4 space-y-4">
+      {(last.exercises || []).map((ex, i) => (
+        <div key={ex.id || i} className="rounded-xl border border-gray-100 p-3">
+          <div className="flex items-center justify-between">
+            <p className="font-medium">{ex.name || `Exercise ${i + 1}`}</p>
+            <p className="text-sm text-gray-500">{ex.sets?.length || 0} sets</p>
           </div>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-gray-500">
+                <tr>
+                  <th className="py-1 pr-4">#</th>
+                  <th className="py-1 pr-4">Weight</th>
+                  <th className="py-1 pr-4">Reps</th>
+                  <th className="py-1 pr-4">RPE</th>
+                  <th className="py-1 pr-4">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(ex.sets || []).map((s, idx) => (
+                  <tr key={idx} className="align-top">
+                    <td className="py-1 pr-4 text-gray-500">{idx + 1}</td>
+                    <td className="py-1 pr-4">{s.weight ?? "–"}</td>
+                    <td className="py-1 pr-4">{s.reps ?? "–"}</td>
+                    <td className="py-1 pr-4">{s.rpe ?? "–"}</td>
+                    <td className="py-1 pr-4 whitespace-pre-wrap">{s.notes ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+      {last.notes && (
+        <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-medium">Session notes</p>
+          <p className="mt-1 whitespace-pre-wrap">{last.notes}</p>
         </div>
       )}
     </div>
-  );
-}
+  )}
+</div>
+
+); };
+
+export default LastWorkoutCard;
+
+// --- Example integration in your Log tab --- // File: src/tabs/LogTab.tsx (or wherever your Log page lives) // // import React from "react"; // import LastWorkoutCard from "../components/LastWorkoutCard"; // // export const LogTab: React.FC<{ db: { log?: LogWorkout[] } } > = ({ db }) => { //   return ( //     <div className="space-y-4"> //       <LastWorkoutCard log={db?.log} /> //       {/* existing log list, filters, etc. below */} //     </div> //   ); // }; // export default LogTab;
+
