@@ -171,9 +171,13 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl"
+      >
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
             <h3 className="text-lg font-semibold">
@@ -273,6 +277,7 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
 function RecentWorkoutsCloud({ programs, setDb }) {
   const [items, setItems] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [expandedId, setExpandedId] = useState(null); // inline fallback
 
   useEffect(() => {
     let alive = true;
@@ -335,10 +340,8 @@ function RecentWorkoutsCloud({ programs, setDb }) {
       await supabase.from("lifting_logs").upsert([{ id: "main", data: payload }], { onConflict: "id" });
       await supabase.from("lifting_logs").upsert([{ id: "gregs-device", data: payload }], { onConflict: "id" });
 
-      // reflect in local db if provided
       setDb?.((prev) => ({ ...(prev || {}), log: nextLog }));
 
-      // update visible list
       setItems((prev) => {
         if (!prev) return prev;
         const arr = [...prev];
@@ -346,7 +349,9 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         if (i >= 0) arr[i] = updated;
         return arr;
       });
+
       setSelected(null);
+      setExpandedId(null);
     } catch (e) {
       console.error("[EditWorkoutModal] Save failed:", e?.message || e);
       alert("Failed to save changes. Check console for details.");
@@ -362,31 +367,54 @@ function RecentWorkoutsCloud({ programs, setDb }) {
       </div>
 
       <div className="grid gap-3">
-        {items.map((w, idx) => (
-          <div
-            key={w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`}
-            className="rounded-xl border border-gray-200 p-3"
-          >
-            <div className="flex items-center justify-between">
-              <div className="text-sm">
-                <div className="font-medium">
-                  {formatShortDate(w)} • {morningOrEvening(w)} • {dayNumberLabel(w, programs)}
+        {items.map((w, idx) => {
+          const key = w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`;
+          return (
+            <div key={key} className="rounded-xl border border-gray-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm">
+                  <div className="font-medium">
+                    {formatShortDate(w)} • {morningOrEvening(w)} • {dayNumberLabel(w, programs)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      console.log("[RecentWorkoutsCloud] View more clicked →", w.id || key);
+                      setSelected(w);
+                      setExpandedId((cur) => (cur === key ? null : key)); // also show inline fallback
+                    }}
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                  >
+                    View more
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelected(w)}
-                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-                >
-                  View more
-                </button>
-              </div>
+
+              {/* Inline fallback details (in case modal gets blocked by some CSS elsewhere) */}
+              {expandedId === key && (
+                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
+                  {getExercisesFromWorkout(w).map((ex, i) => (
+                    <div key={i} className="mt-1">
+                      <div className="font-medium">{ex.name}</div>
+                      <div className="text-xs text-gray-600">
+                        {getSets(ex).map((s, j) => (
+                          <span key={j} className="mr-2">
+                            #{j + 1}: {s.reps} × {setWeight(s)}kg
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
+      {/* Modal (primary UI) */}
       <EditWorkoutModal
         open={!!selected}
         onClose={() => setSelected(null)}
@@ -541,7 +569,7 @@ export default function ProgressTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* Last 5 Saved Workouts (cloud) with View more → editable modal */}
+      {/* Last 5 Saved Workouts (cloud) with View more → editable modal + inline fallback */}
       <RecentWorkoutsCloud programs={programs} setDb={setDb} />
     </div>
   );
