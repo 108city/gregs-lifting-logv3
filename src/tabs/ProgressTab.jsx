@@ -104,137 +104,22 @@ function Portal({ children }) {
   return ReactDOM.createPortal(children, document.body);
 }
 
-/* Edit Modal (forced black-on-white inputs) */
+/* Edit Modal (read-only summary, stable) */
 function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
-  const [draft, setDraft] = useState(workout || null);
-  const [errorMsg, setErrorMsg] = useState("");
+  if (!open || !workout) return null;
+  const exercises = getExercisesFromWorkout(workout);
 
-  useEffect(() => {
-    setDraft(workout || null);
-    setErrorMsg("");
-  }, [workout]);
-
-  // lock body scroll when open
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
-  if (!open) return null;
-
-  // Build editable entries with guards
-  let entries = [];
-  try {
-    const src = draft || workout || {};
-    entries =
-      Array.isArray(src?.entries) && src.entries.length
-        ? src.entries.map((e) => ({
-            exerciseId: e?.exerciseId ?? e?.id ?? e?.exerciseName ?? "ex",
-            exerciseName: e?.exerciseName ?? e?.name ?? "Exercise",
-            rating: e?.rating ?? null,
-            sets: Array.isArray(e?.sets)
-              ? e.sets.map((s) => ({
-                  reps: Number(s?.reps || 0),
-                  kg: Number((s?.kg ?? s?.weight) || 0),
-                  notes: s?.notes || "",
-                }))
-              : [],
-          }))
-        : Array.isArray(src?.exercises) && src.exercises.length
-        ? src.exercises.map((ex) => ({
-            exerciseId: ex?.exerciseId ?? ex?.id ?? ex?.name ?? "ex",
-            exerciseName: ex?.name ?? ex?.exerciseName ?? "Exercise",
-            rating: ex?.rating ?? null,
-            sets: Array.isArray(ex?.sets)
-              ? ex.sets.map((s) => ({
-                  reps: Number(s?.reps || 0),
-                  kg: Number((s?.kg ?? s?.weight) || 0),
-                  notes: s?.notes || "",
-                }))
-              : [],
-          }))
-        : [];
-  } catch (e) {
-    console.error("[EditWorkoutModal] entries-build error:", e?.message || e);
-    setErrorMsg(e?.message || String(e));
-    entries = [];
-  }
-
-  const setEntryRating = (i, rating) => {
-    setDraft((d) => {
-      const base = d || workout || {};
-      const copy = { ...base, entries: (entries || []).map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s })) })) };
-      copy.entries[i].rating = copy.entries[i].rating === rating ? null : rating;
-      return copy;
-    });
-  };
-  const setEntrySet = (i, j, patch) => {
-    setDraft((d) => {
-      const base = d || workout || {};
-      const copy = { ...base, entries: (entries || []).map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s })) })) };
-      copy.entries[i].sets[j] = { ...copy.entries[i].sets[j], ...patch };
-      return copy;
-    });
-  };
-
-  const handleSave = () => {
-    try {
-      const base = draft || workout || {};
-      const normalized = {
-        ...base,
-        entries: (entries || []).map((e) => ({
-          exerciseId: e.exerciseId,
-          exerciseName: e.exerciseName,
-          rating: e.rating ?? null,
-          sets: e.sets.map((s) => ({
-            reps: Number(s?.reps || 0),
-            kg: Number(s?.kg || 0),
-            notes: s?.notes || "",
-          })),
-        })),
-      };
-      onSave?.(normalized);
-    } catch (e) {
-      console.error("[EditWorkoutModal] normalize error:", e?.message || e);
-      setErrorMsg(e?.message || String(e));
-    }
-  };
-
-  const inputClass =
-    "w-full rounded border border-gray-300 px-2 py-1 bg-white text-black placeholder-gray-400 " +
-    "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
-  const labelClass = "text-xs text-gray-700";
-  const setLabelClass = "text-xs text-gray-600";
-
-  const headerTitle = (() => {
-    try {
-      return `${formatShortDate(draft || workout)} • ${morningOrEvening(draft || workout)} • ${dayNumberLabel(
-        draft || workout,
-        programs
-      )}`;
-    } catch {
-      return "Workout";
-    }
-  })();
+  const headerTitle = `${formatShortDate(workout)} • ${morningOrEvening(
+    workout
+  )} • ${dayNumberLabel(workout, programs)}`;
 
   return (
     <Portal>
       <div className="fixed inset-0 z-[9999] flex items-center justify-center">
         <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl"
-        >
+        <div className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <div>
-              <h3 className="text-lg font-semibold text-black">{headerTitle}</h3>
-              <p className="text-xs text-gray-600">Edit reps/kg and rating. Save to update history.</p>
-            </div>
+            <h3 className="text-lg font-semibold text-black">{headerTitle}</h3>
             <button
               onClick={onClose}
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
@@ -243,92 +128,27 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
             </button>
           </div>
 
-          {errorMsg ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              Something went wrong rendering this workout. You can still see the raw data below.
-              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-red-900">
-{JSON.stringify(workout, null, 2)}
-              </pre>
-            </div>
-          ) : entries.length === 0 ? (
-            <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-              This workout has no editable entries/sets.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {entries.map((e, ei) => (
-                <div key={`${e.exerciseId}-${ei}`} className="rounded-xl border border-gray-200">
-                  <div className="flex items-center justify-between gap-2 p-3">
-                    <div className="font-medium text-blue-600">{e.exerciseName}</div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        className={`px-2 py-1 rounded text-xs ${e.rating === "easy" ? "bg-green-600 text-white" : "bg-gray-100 text-black"}`}
-                        onClick={() => setEntryRating(ei, "easy")}
-                      >
-                        Easy
-                      </button>
-                      <button
-                        className={`px-2 py-1 rounded text-xs ${e.rating === "moderate" ? "bg-orange-400 text-black" : "bg-gray-100 text-black"}`}
-                        onClick={() => setEntryRating(ei, "moderate")}
-                      >
-                        Moderate
-                      </button>
-                      <button
-                        className={`px-2 py-1 rounded text-xs ${e.rating === "hard" ? "bg-red-600 text-white" : "bg-gray-100 text-black"}`}
-                        onClick={() => setEntryRating(ei, "hard")}
-                      >
-                        Hard
-                      </button>
-                    </div>
-                  </div>
-                  <div className="border-t border-gray-200 p-3 space-y-2">
-                    {e.sets.map((s, si) => (
-                      <div key={si} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
-                        <div className={setLabelClass}>Set {si + 1}</div>
-                        <div className="md:col-span-2">
-                          <label className={labelClass}>Reps</label>
-                          <input
-                            type="number"
-                            value={String(s.reps)}
-                            min={0}
-                            onChange={(ev) => setEntrySet(ei, si, { reps: Number(ev.target.value || 0) })}
-                            className={inputClass}
-                          />
-                        </div>
-                        <div className="md:col-span-2">
-                          <label className={labelClass}>Weight (kg)</label>
-                          <input
-                            type="number"
-                            value={String(s.kg)}
-                            min={0}
-                            step="0.5"
-                            onChange={(ev) => setEntrySet(ei, si, { kg: Number(ev.target.value || 0) })}
-                            className={inputClass}
-                          />
-                        </div>
-                        <div>
-                          <label className={labelClass}>Notes</label>
-                          <input
-                            type="text"
-                            value={s.notes || ""}
-                            onChange={(ev) => setEntrySet(ei, si, { notes: ev.target.value })}
-                            className={inputClass}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+          <div className="space-y-3">
+            {exercises.map((ex, i) => (
+              <div key={i} className="rounded-xl border border-gray-200 p-3">
+                <div className="font-medium">{ex.name}</div>
+                <div className="mt-1 text-sm text-gray-700">
+                  {getSets(ex).map((s, j) => (
+                    <span key={j} className="mr-3">
+                      #{j + 1}: {s.reps} × {setWeight(s)}kg
+                    </span>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            ))}
+          </div>
 
           <div className="mt-4 flex justify-end">
             <button
-              onClick={handleSave}
+              onClick={onClose}
               className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
             >
-              Save changes
+              Done
             </button>
           </div>
         </div>
@@ -341,7 +161,6 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
 function RecentWorkoutsCloud({ programs, setDb }) {
   const [items, setItems] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [expandedId, setExpandedId] = useState(null); // inline fallback
 
   useEffect(() => {
     let alive = true;
@@ -388,40 +207,6 @@ function RecentWorkoutsCloud({ programs, setDb }) {
     };
   }, []);
 
-  async function saveEditedWorkout(updated) {
-    try {
-      const { data: main } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "main")
-        .maybeSingle();
-      const base = Array.isArray(main?.data?.log) ? main.data.log : [];
-
-      const idx = base.findIndex((w) => w.id === updated.id);
-      const nextLog = idx >= 0 ? base.map((w, i) => (i === idx ? updated : w)) : [updated, ...base];
-      const payload = { log: nextLog };
-
-      await supabase.from("lifting_logs").upsert([{ id: "main", data: payload }], { onConflict: "id" });
-      await supabase.from("lifting_logs").upsert([{ id: "gregs-device", data: payload }], { onConflict: "id" });
-
-      setDb?.((prev) => ({ ...(prev || {}), log: nextLog }));
-
-      setItems((prev) => {
-        if (!prev) return prev;
-        const arr = [...prev];
-        const i = arr.findIndex((w) => w.id === updated.id);
-        if (i >= 0) arr[i] = updated;
-        return arr;
-      });
-
-      setSelected(null);
-      setExpandedId(null);
-    } catch (e) {
-      console.error("[EditWorkoutModal] Save failed:", e?.message || e);
-      alert("Failed to save changes. Check console for details.");
-    }
-  }
-
   if (!items || items.length === 0) return null;
 
   return (
@@ -444,46 +229,24 @@ function RecentWorkoutsCloud({ programs, setDb }) {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelected(w);
-                      setExpandedId((cur) => (cur === key ? null : key)); // inline fallback too
-                    }}
+                    onClick={() => setSelected(w)}
                     className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
                   >
                     View more
                   </button>
                 </div>
               </div>
-
-              {/* Inline fallback details */}
-              {expandedId === key && (
-                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
-                  {getExercisesFromWorkout(w).map((ex, i) => (
-                    <div key={i} className="mt-1">
-                      <div className="font-medium">{ex.name}</div>
-                      <div className="text-xs text-gray-600">
-                        {getSets(ex).map((s, j) => (
-                          <span key={j} className="mr-2">
-                            #{j + 1}: {s.reps} × {setWeight(s)}kg
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}
       </div>
 
-      {/* Modal (primary UI, via Portal) */}
+      {/* Modal (via Portal) */}
       <EditWorkoutModal
         open={!!selected}
         onClose={() => setSelected(null)}
         workout={selected}
         programs={programs}
-        onSave={saveEditedWorkout}
       />
     </div>
   );
@@ -491,7 +254,7 @@ function RecentWorkoutsCloud({ programs, setDb }) {
 
 /* ───────────────────────── 2-Week Calendar ───────────────────────── */
 function TwoWeekCalendar({ workouts }) {
-  // Local YYYY-MM-DD (no UTC shift)
+  // Local YYYY-MM-DD key (prevents UTC off-by-one)
   const localIso = (dIn) => {
     const d = new Date(dIn);
     const y = d.getFullYear();
@@ -500,7 +263,7 @@ function TwoWeekCalendar({ workouts }) {
     return `${y}-${m}-${day}`;
   };
 
-  // Make a set of LOCAL-ISO dates that have at least one meaningful workout
+  // Dates with at least one meaningful workout (LOCAL)
   const worked = useMemo(() => {
     const set = new Set();
     for (const w of workouts) {
@@ -511,17 +274,16 @@ function TwoWeekCalendar({ workouts }) {
     return set;
   }, [workouts]);
 
-  // Last 14 days (local)
+  // Last 14 days (local midnights)
   const days = [];
   for (let i = 13; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    // normalize to local midnight for display consistency
     days.push(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
   }
   const rows = [days.slice(0, 7), days.slice(7)];
 
-  // Better internal spacing (padding) and vertical stacking
+  // Comfy internal padding and spacing so emoji/text never touch borders
   const cellBase =
     "h-20 rounded-xl border flex flex-col items-center justify-center px-4 py-3 space-y-1 text-sm";
   const labelCls = "text-[11px] text-gray-500";
@@ -576,6 +338,158 @@ function TwoWeekCalendar({ workouts }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── Main ProgressTab ───────────────────────── */
+export default function ProgressTab({ db, setDb }) {
+  const log = db?.log || [];
+  const programs = db?.programs || [];
+
+  // Only meaningful workouts
+  const filteredLog = useMemo(
+    () => (Array.isArray(log) ? log.filter(isMeaningfulWorkout) : []),
+    [log]
+  );
+
+  // Distinct exercise names (only those with real sets)
+  const exerciseNames = useMemo(() => {
+    const set = new Set();
+    for (const w of filteredLog) {
+      for (const ex of getExercisesFromWorkout(w)) {
+        if (getSets(ex).some(hasRealSet)) set.add(ex.name);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [filteredLog]);
+
+  const [selectedExercise, setSelectedExercise] = useState(exerciseNames[0] || "");
+  useEffect(() => {
+    if (!selectedExercise && exerciseNames.length) {
+      setSelectedExercise(exerciseNames[0]);
+    } else if (selectedExercise && !exerciseNames.includes(selectedExercise)) {
+      setSelectedExercise(exerciseNames[0] || "");
+    }
+  }, [exerciseNames]); // eslint-disable-line
+
+  // Build series + stats for selected exercise
+  const { lineSeries, startWeight, maxWeight, diffWeight } = useMemo(() => {
+    if (!selectedExercise) return { lineSeries: [], startWeight: 0, maxWeight: 0, diffWeight: 0 };
+
+    const points = [];
+    for (const w of filteredLog) {
+      const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
+      if (!when) continue;
+      for (const ex of getExercisesFromWorkout(w)) {
+        if (ex.name !== selectedExercise) continue;
+        const realSets = getSets(ex).filter(hasRealSet);
+        if (realSets.length === 0) continue;
+        const best = realSets.reduce((m, s) => Math.max(m, setWeight(s)), 0);
+        points.push({ date: isoDate(when), weight: best });
+      }
+    }
+    // combine by date (max per day)
+    const byDate = new Map();
+    for (const p of points) {
+      byDate.set(p.date, Math.max(byDate.get(p.date) || 0, p.weight));
+    }
+    const series = Array.from(byDate.entries())
+      .map(([date, weight]) => ({ date, weight }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const start = series.length ? series[0].weight : 0;
+    const max = series.reduce((m, p) => Math.max(m, p.weight), 0);
+    return { lineSeries: series, startWeight: start, maxWeight: max, diffWeight: max - start };
+  }, [filteredLog, selectedExercise]);
+
+  // KPIs: last 7 & 30 days (meaningful workouts only)
+  const { recent7, recent30 } = useMemo(() => {
+    const now = new Date();
+    let last7 = 0,
+      last30 = 0;
+    for (const w of filteredLog) {
+      const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || null;
+      if (!when) continue;
+      const diff = daysBetween(when, now);
+      if (diff <= 7) last7++;
+      if (diff <= 30) last30++;
+    }
+    return { recent7: last7, recent30: last30 };
+  }, [filteredLog]);
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-4">
+      {/* TOP: Exercise selector + stats block */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-base font-semibold">Max Weight Progress</h3>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600">Exercise</label>
+            <select
+              value={selectedExercise}
+              onChange={(e) => setSelectedExercise(e.target.value)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm sm:text-base text-gray-900"
+            >
+              {exerciseNames.map((name) => (
+                <option key={name} value={name} className="text-gray-900">
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs text-gray-600">Starting Weight</p>
+            <p className="mt-1 text-2xl font-semibold">{startWeight}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs text-gray-600">Current Max</p>
+            <p className="mt-1 text-2xl font-semibold">{maxWeight}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs text-gray-600">Difference</p>
+            <p className={`mt-1 text-2xl font-semibold ${diffWeight >= 0 ? "text-green-600" : "text-red-600"}`}>
+              {diffWeight >= 0 ? "+" : ""}
+              {diffWeight}
+            </p>
+          </div>
+        </div>
+
+        {/* Line chart */}
+        <div className="mt-4 h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={lineSeries} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Line type="monotone" dataKey="weight" name="Session max" dot activeDot={{ r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 7 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent7}</p>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 30 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent30}</p>
+        </div>
+      </div>
+
+      {/* 2-week calendar */}
+      <TwoWeekCalendar workouts={filteredLog} />
+
+      {/* Last 5 Saved Workouts */}
+      <RecentWorkoutsCloud programs={programs} setDb={setDb} />
     </div>
   );
 }
