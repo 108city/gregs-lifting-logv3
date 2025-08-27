@@ -443,15 +443,15 @@ export default function ProgressTab({ db, setDb }) {
         {/* Stats */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <p className="text-xs text-gray-600">Starting Weight</p>
+            <p className="text-xs text-gray-600">Starting Weight KG</p>
             <p className="mt-1 text-2xl font-semibold">{startWeight}</p>
           </div>
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <p className="text-xs text-gray-600">Current Max</p>
+            <p className="text-xs text-gray-600">Current Max KG</p>
             <p className="mt-1 text-2xl font-semibold">{maxWeight}</p>
           </div>
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <p className="text-xs text-gray-600">Difference</p>
+            <p className="text-xs text-gray-600">Difference KG</p>
             <p className={`mt-1 text-2xl font-semibold ${diffWeight >= 0 ? "text-green-600" : "text-red-600"}`}>
               {diffWeight >= 0 ? "+" : ""}
               {diffWeight}
