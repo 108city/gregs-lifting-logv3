@@ -31,24 +31,47 @@ export default function LogTab({ db, onOpenWorkout }) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4">
-      {/* Top: Last recorded workout card */}
+      {/* --- New workout section (your existing UI) --- */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+        {/* Replace this block with your actual new-workout controls/form/CTA */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-gray-500">Start a new session</p>
+            <h2 className="text-lg font-semibold">New Workout</h2>
+          </div>
+          <button
+            className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            onClick={() => {
+              // hook up to your existing start-workout logic
+              // e.g., setView("editing") / navigate("/workout/new") etc.
+              if (typeof window !== "undefined") {
+                console.log("TODO: start new workout");
+              }
+            }}
+          >
+            Start workout
+          </button>
+        </div>
+      </div>
+
+      {/* --- Last recorded workout card (inline details on expand) --- */}
       <LastWorkoutCard log={log} />
 
-      {/* Divider */}
+      {/* --- Divider --- */}
       <div className="pt-2">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
           All Workouts
         </h2>
       </div>
 
-      {/* Empty state */}
+      {/* --- Empty state --- */}
       {sorted.length === 0 && (
         <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center text-gray-500">
           No workouts yet. Start a session and it will appear here.
         </div>
       )}
 
-      {/* Workouts list */}
+      {/* --- Workouts list --- */}
       <div className="grid gap-3">
         {sorted.map((w) => {
           const key = w.id || `${w.date || w.endedAt || w.startedAt}`;
@@ -70,8 +93,8 @@ export default function LogTab({ db, onOpenWorkout }) {
                     {formatDate(w.date || w.endedAt || w.startedAt)}
                   </p>
                   <p className="mt-1 text-sm text-gray-500">
-                    {exCount} exercise{exCount === 1 ? "" : "s"} · {setCount}{" "}
-                    set{setCount === 1 ? "" : "s"}
+                    {exCount} exercise{exCount === 1 ? "" : "s"} · {setCount} set
+                    {setCount === 1 ? "" : "s"}
                   </p>
                 </div>
                 <div className="shrink-0 rounded-xl border border-gray-200 px-3 py-1 text-sm text-gray-700">
