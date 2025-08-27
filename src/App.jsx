@@ -1,135 +1,154 @@
 // src/App.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { loadDbFromCloud, saveDbToCloud } from "./syncService.js";
 import LogTab from "./tabs/LogTab.jsx";
 import ProgressTab from "./tabs/ProgressTab.jsx";
-import ProgramTab from "./tabs/ProgramTab.jsx"; // <- bring back Programs tab
+import ProgramTab from "./tabs/ProgramTab.jsx"; // ← comment out if you don't have it
 
-// Keys for local backup
 const LS_KEY = "liftinglog_db_v1";
 
-// Utility: shallow-merge cloud -> local, only if cloud has meaningful data
+// ───────── helpers
+const sanitizeDb = (db) => ({
+  programs: Array.isArray(db?.programs) ? db.programs : [],
+  activeProgramId: db?.activeProgramId ?? null,
+  log: Array.isArray(db?.log) ? db.log : [],
+});
+
 function mergeCloudIntoLocal(localDb, cloudDb) {
-  if (!cloudDb || typeof cloudDb !== "object") return localDb;
+  const cloud = sanitizeDb(cloudDb);
+  const hasCloudPrograms = cloud.programs.length > 0;
+  const hasCloudLog = cloud.log.length > 0;
+  const hasCloudActive = !!cloud.activeProgramId;
 
-  const hasCloudPrograms = Array.isArray(cloudDb.programs) && cloudDb.programs.length > 0;
-  const hasCloudLog = Array.isArray(cloudDb.log) && cloudDb.log.length > 0;
-
-  // Only take cloud if it actually contains something
-  if (!hasCloudPrograms && !hasCloudLog && cloudDb.activeProgramId == null) {
-    return localDb;
-  }
+  // If cloud is basically empty, keep local
+  if (!hasCloudPrograms && !hasCloudLog && !hasCloudActive) return localDb;
 
   const merged = {
     ...localDb,
-    ...cloudDb,
-    programs: hasCloudPrograms ? cloudDb.programs : localDb.programs,
-    log: hasCloudLog ? cloudDb.log : localDb.log,
+    ...cloud,
+    programs: hasCloudPrograms ? cloud.programs : localDb.programs,
+    log: hasCloudLog ? cloud.log : localDb.log,
     activeProgramId:
-      cloudDb.activeProgramId !== undefined ? cloudDb.activeProgramId : localDb.activeProgramId,
+      hasCloudActive ? cloud.activeProgramId : (localDb.activeProgramId ?? null),
   };
 
-  // Backfill activeProgramId if still missing but programs exist
-  if (!merged.activeProgramId && Array.isArray(merged.programs) && merged.programs.length > 0) {
+  // backfill active if missing
+  if (!merged.activeProgramId && merged.programs.length > 0) {
     merged.activeProgramId = merged.programs[0].id;
   }
-
   return merged;
 }
 
+// ───────── App
 export default function App() {
-  // 1) Initialize from localStorage backup to avoid blank UI
   const [db, setDb] = useState(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        // Ensure shape
-        return {
-          programs: Array.isArray(parsed.programs) ? parsed.programs : [],
-          activeProgramId: parsed.activeProgramId ?? null,
-          log: Array.isArray(parsed.log) ? parsed.log : [],
-        };
-      }
+      if (raw) return sanitizeDb(JSON.parse(raw));
     } catch {}
-    return { programs: [], activeProgramId: null, log: [] };
+    return sanitizeDb({});
   });
 
   const [tab, setTab] = useState("log"); // "log" | "progress" | "program"
   const [loadingCloud, setLoadingCloud] = useState(true);
   const [savingCloud, setSavingCloud] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [lastError, setLastError] = useState("");
 
-  // 2) Load from cloud on mount but don't wipe local if cloud is empty
+  // counts for status
+  const counts = useMemo(() => {
+    const days = (db.programs || []).reduce((acc, p) => acc + (p.days?.length || 0), 0);
+    return {
+      programs: db.programs?.length || 0,
+      days,
+      log: db.log?.length || 0,
+    };
+  }, [db]);
+
+  // ── initial load (localStorage already loaded). Pull cloud & merge.
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const cloud = await loadDbFromCloud();
         if (!alive) return;
-        const merged = mergeCloudIntoLocal(db, cloud);
-        setDb(merged);
+        setDb((prev) => mergeCloudIntoLocal(prev, cloud));
+        setLastError("");
       } catch (e) {
-        console.error("[App] initial cloud load failed:", e?.message || e);
+        console.error("[App] initial cloud load failed:", e);
+        setLastError(e?.message || String(e));
       } finally {
         if (alive) setLoadingCloud(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 3) Persist to localStorage on every db change (instant backup)
+  // ── persist to localStorage every change
   useEffect(() => {
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify(db));
+      localStorage.setItem(LS_KEY, JSON.stringify(sanitizeDb(db)));
     } catch {}
   }, [db]);
 
-  // 4) Debounced autosave to cloud — only if there is content to save
+  // ── debounced autosave to cloud (only if there is meaningful content)
   useEffect(() => {
     if (loadingCloud) return;
+    const hasSomething =
+      (db.programs?.length || 0) > 0 ||
+      (db.log?.length || 0) > 0 ||
+      !!db.activeProgramId;
 
-    const hasPrograms = Array.isArray(db.programs) && db.programs.length > 0;
-    const hasLog = Array.isArray(db.log) && db.log.length > 0;
-    const hasActive = !!db.activeProgramId;
+    if (!hasSomething) return;
 
-    if (!hasPrograms && !hasLog && !hasActive) {
-      // nothing meaningful to save yet
-      return;
-    }
-
-    setSavingCloud(true);
-    const handle = setTimeout(() => {
-      (async () => {
-        try {
-          await saveDbToCloud(db);
-          setLastSavedAt(new Date());
-        } catch (e) {
-          console.error("[App] autosave failed:", e?.message || e);
-        } finally {
-          setSavingCloud(false);
-        }
-      })();
-    }, 600); // debounce
+    const handle = setTimeout(async () => {
+      try {
+        setSavingCloud(true);
+        await saveDbToCloud(db);
+        setLastSavedAt(new Date());
+        setLastError("");
+      } catch (e) {
+        console.error("[App] autosave failed:", e);
+        setLastError(e?.message || String(e));
+      } finally {
+        setSavingCloud(false);
+      }
+    }, 600);
 
     return () => clearTimeout(handle);
   }, [db, loadingCloud]);
 
-  // 5) Refresh from cloud on focus/visibility, but don't clobber if cloud empty
+  // ── manual buttons
+  const forceRefresh = async () => {
+    try {
+      const cloud = await loadDbFromCloud();
+      setDb((prev) => mergeCloudIntoLocal(prev, cloud));
+      setLastError("");
+    } catch (e) {
+      console.error("[App] force refresh failed:", e);
+      setLastError(e?.message || String(e));
+    }
+  };
+  const pushNow = async () => {
+    try {
+      setSavingCloud(true);
+      await saveDbToCloud(db);
+      setLastSavedAt(new Date());
+      setLastError("");
+    } catch (e) {
+      console.error("[App] push now failed:", e);
+      setLastError(e?.message || String(e));
+    } finally {
+      setSavingCloud(false);
+    }
+  };
+
+  // ── refresh when returning to app
   useEffect(() => {
-    const onFocus = async () => {
-      try {
-        const cloud = await loadDbFromCloud();
-        setDb((prev) => mergeCloudIntoLocal(prev, cloud));
-      } catch (e) {
-        console.error("[App] focus refresh failed:", e?.message || e);
-      }
-    };
+    const onFocus = () => forceRefresh();
     const onVis = () => {
-      if (document.visibilityState === "visible") onFocus();
+      if (document.visibilityState === "visible") forceRefresh();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVis);
@@ -137,9 +156,9 @@ export default function App() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVis);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Simple tab button
   const TabButton = ({ id, children }) => (
     <button
       onClick={() => setTab(id)}
@@ -164,15 +183,37 @@ export default function App() {
           </div>
         </div>
 
-        {/* sync status */}
-        <div className="mt-2 text-xs text-zinc-400">
-          {loadingCloud
-            ? "Loading from cloud…"
-            : savingCloud
-            ? "Saving changes…"
-            : lastSavedAt
-            ? `Saved: ${lastSavedAt.toLocaleTimeString()}`
-            : "Loaded"}
+        {/* Sync/status strip */}
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
+          <span>
+            {loadingCloud
+              ? "Loading cloud…"
+              : savingCloud
+              ? "Saving…"
+              : lastSavedAt
+              ? `Saved ${lastSavedAt.toLocaleTimeString()}`
+              : "Loaded"}
+          </span>
+          <span className="opacity-60">
+            • programs: {counts.programs} • days: {counts.days} • workouts: {counts.log}
+          </span>
+          <button
+            onClick={forceRefresh}
+            className="rounded border border-zinc-700 px-2 py-1 hover:bg-zinc-800"
+            title="Pull from cloud"
+          >
+            Force Refresh
+          </button>
+          <button
+            onClick={pushNow}
+            className="rounded border border-zinc-700 px-2 py-1 hover:bg-zinc-800"
+            title="Push local to cloud"
+          >
+            Push Now
+          </button>
+          {lastError ? (
+            <span className="text-red-400">• error: {lastError}</span>
+          ) : null}
         </div>
       </div>
 
