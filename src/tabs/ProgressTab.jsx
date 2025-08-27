@@ -11,14 +11,7 @@ import {
 } from "recharts";
 import { supabase } from "../supabaseClient.js";
 
-/* ===============================
-   Utilities & compatibility
-   =============================== */
-function startOfDay(d = new Date()) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
+/* ───────────────────────── Utilities & compatibility ───────────────────────── */
 function isoDate(d = new Date()) {
   return new Date(d).toISOString().slice(0, 10);
 }
@@ -32,7 +25,12 @@ function byNewest(a, b) {
   const kb = toDate(b?.date || b?.endedAt || b?.startedAt || 0)?.getTime() ?? 0;
   return kb - ka;
 }
-function formatDateTimeOrDate(w) {
+function daysBetween(a, b) {
+  const A = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+  const B = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.floor((B - A) / (1000 * 60 * 60 * 24));
+}
+function formatShortDate(w) {
   const dt = toDate(w?.date || w?.endedAt || w?.startedAt);
   if (!dt) return "Unknown";
   return dt.toLocaleString(undefined, {
@@ -48,10 +46,8 @@ function morningOrEvening(w) {
     (w?.date ? new Date(w.date + "T00:00:00") : null);
   if (!dt || Number.isNaN(dt.getTime())) return "—";
   const h = dt.getHours();
-  if (Number.isNaN(h)) return "—";
   return h < 12 ? "Morning" : "Evening";
 }
-
 /* support both shapes: exercises[].name/sets[].weight or entries[].exerciseName/sets[].kg */
 function getExercisesFromWorkout(w) {
   if (!w) return [];
@@ -93,16 +89,13 @@ function isMeaningfulWorkout(w) {
   return exs.some((ex) => getSets(ex).some(hasRealSet));
 }
 function dayNumberLabel(w, programs) {
-  // find the program/day index for display "Day 1/2/3"
   const prog = programs?.find?.((p) => p.id === w?.programId);
   if (!prog) return "Day ?";
   const idx = (prog.days || []).findIndex((d) => d.id === w?.dayId);
   return idx >= 0 ? `Day ${idx + 1}` : "Day ?";
 }
 
-/* ===============================
-   Edit Modal for a workout (inline)
-   =============================== */
+/* ───────────────────────── Edit Modal ───────────────────────── */
 function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   const [draft, setDraft] = useState(workout || null);
 
@@ -112,17 +105,26 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
 
   if (!open || !draft) return null;
 
-  // Compatibility draft editing: support entries[] shape primarily. If workout has exercises[], map them to entries for editing.
+  // Normalize to entries[] for editing
   const entries = useMemo(() => {
-    if (Array.isArray(draft.entries)) return draft.entries;
+    if (Array.isArray(draft.entries)) return draft.entries.map((e) => ({
+      exerciseId: e.exerciseId ?? e.id ?? e.exerciseName,
+      exerciseName: e.exerciseName ?? e.name ?? "Exercise",
+      rating: e.rating ?? null,
+      sets: (e.sets || []).map((s) => ({
+        reps: Number(s?.reps || 0),
+        kg: Number((s?.kg ?? s?.weight) || 0),
+        notes: s?.notes || "",
+      })),
+    }));
     if (Array.isArray(draft.exercises)) {
       return draft.exercises.map((ex) => ({
-        exerciseId: ex.exerciseId || ex.id || ex.name,
-        exerciseName: ex.name || ex.exerciseName || "Exercise",
+        exerciseId: ex.exerciseId ?? ex.id ?? ex.name,
+        exerciseName: ex.name ?? ex.exerciseName ?? "Exercise",
         rating: ex.rating ?? null,
         sets: (ex.sets || []).map((s) => ({
           reps: Number(s?.reps || 0),
-          kg: s?.kg !== undefined ? Number(s.kg || 0) : Number(s?.weight || 0),
+          kg: Number((s?.kg ?? s?.weight) || 0),
           notes: s?.notes || "",
         })),
       }));
@@ -139,14 +141,19 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   };
   const setEntrySet = (i, j, patch) => {
     setDraft((d) => {
-      const copy = { ...d, entries: entries.map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s })) })) };
+      const copy = {
+        ...d,
+        entries: entries.map((e) => ({
+          ...e,
+          sets: e.sets.map((s) => ({ ...s })),
+        })),
+      };
       copy.entries[i].sets[j] = { ...copy.entries[i].sets[j], ...patch };
       return copy;
     });
   };
 
   const handleSave = () => {
-    // Normalize to entries[] with kg
     const normalized = {
       ...draft,
       entries: entries.map((e) => ({
@@ -166,13 +173,13 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-10 w-[min(96vw,820px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
+      <div className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
             <h3 className="text-lg font-semibold">
-              {formatDateTimeOrDate(draft)} • {morningOrEvening(draft)} • {dayNumberLabel(draft, programs)}
+              {formatShortDate(draft)} • {morningOrEvening(draft)} • {dayNumberLabel(draft, programs)}
             </h3>
-            <p className="text-xs text-gray-500">Edit reps/kg and rating. Changes will be saved to history.</p>
+            <p className="text-xs text-gray-500">Edit reps/kg and rating. Save to update history.</p>
           </div>
           <button
             onClick={onClose}
@@ -262,28 +269,23 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   );
 }
 
-/* ===============================
-   Recent Workouts (cloud)
-   =============================== */
-function RecentWorkoutsCloud({ programs, onOpen, setDb }) {
-  const [items, setItems] = useState(null); // null loading, [] none
-  const [selected, setSelected] = useState(null); // workout to view/edit
+/* ───────────────────────── Last 5 (cloud) ───────────────────────── */
+function RecentWorkoutsCloud({ programs, setDb }) {
+  const [items, setItems] = useState(null);
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     let alive = true;
 
     async function fetchCloudLog() {
-      // Prefer syncService if present
       try {
         const m = await import("../syncService.js");
         if (m && typeof m.loadFromCloud === "function") {
           const cloud = await m.loadFromCloud();
           return Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
         }
-      } catch {
-        /* ignore */
-      }
-      // Fallback: direct Supabase (id='gregs-device' or 'main')
+      } catch {}
+      // fallback: prefer device row if it exists, else main
       const { data: dev } = await supabase
         .from("lifting_logs")
         .select("data")
@@ -317,36 +319,33 @@ function RecentWorkoutsCloud({ programs, onOpen, setDb }) {
     };
   }, []);
 
-  // Save edited workout back (update db + cloud)
   async function saveEditedWorkout(updated) {
     try {
-      // Load latest cloud log to avoid stale merge
       const { data: main } = await supabase
         .from("lifting_logs")
         .select("data")
         .eq("id", "main")
         .maybeSingle();
-      const log = Array.isArray(main?.data?.log) ? main.data.log : [];
+      const base = Array.isArray(main?.data?.log) ? main.data.log : [];
 
-      const idx = log.findIndex((w) => w.id === updated.id);
-      const nextLog = idx >= 0 ? log.map((w, i) => (i === idx ? updated : w)) : [updated, ...log];
-
-      // upsert to both rows (mirror)
+      const idx = base.findIndex((w) => w.id === updated.id);
+      const nextLog = idx >= 0 ? base.map((w, i) => (i === idx ? updated : w)) : [updated, ...base];
       const payload = { log: nextLog };
+
       await supabase.from("lifting_logs").upsert([{ id: "main", data: payload }], { onConflict: "id" });
       await supabase.from("lifting_logs").upsert([{ id: "gregs-device", data: payload }], { onConflict: "id" });
 
-      // reflect into local setDb if available via latest payload
+      // reflect in local db if provided
       setDb?.((prev) => ({ ...(prev || {}), log: nextLog }));
 
-      // refresh list
+      // update visible list
       setItems((prev) => {
-        const arr = prev ? [...prev] : [];
-        const localIdx = arr.findIndex((w) => w.id === updated.id);
-        if (localIdx >= 0) arr[localIdx] = updated;
+        if (!prev) return prev;
+        const arr = [...prev];
+        const i = arr.findIndex((w) => w.id === updated.id);
+        if (i >= 0) arr[i] = updated;
         return arr;
       });
-
       setSelected(null);
     } catch (e) {
       console.error("[EditWorkoutModal] Save failed:", e?.message || e);
@@ -354,8 +353,7 @@ function RecentWorkoutsCloud({ programs, onOpen, setDb }) {
     }
   }
 
-  if (!items) return null;
-  if (items.length === 0) return null;
+  if (!items || items.length === 0) return null;
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -372,7 +370,7 @@ function RecentWorkoutsCloud({ programs, onOpen, setDb }) {
             <div className="flex items-center justify-between">
               <div className="text-sm">
                 <div className="font-medium">
-                  {formatDateTimeOrDate(w)} • {morningOrEvening(w)} • {dayNumberLabel(w, programs)}
+                  {formatShortDate(w)} • {morningOrEvening(w)} • {dayNumberLabel(w, programs)}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -389,7 +387,6 @@ function RecentWorkoutsCloud({ programs, onOpen, setDb }) {
         ))}
       </div>
 
-      {/* Modal */}
       <EditWorkoutModal
         open={!!selected}
         onClose={() => setSelected(null)}
@@ -401,9 +398,7 @@ function RecentWorkoutsCloud({ programs, onOpen, setDb }) {
   );
 }
 
-/* ===============================
-   ProgressTab (main)
-   =============================== */
+/* ───────────────────────── Main ProgressTab ───────────────────────── */
 export default function ProgressTab({ db, setDb }) {
   const log = db?.log || [];
   const programs = db?.programs || [];
@@ -414,7 +409,7 @@ export default function ProgressTab({ db, setDb }) {
     [log]
   );
 
-  // Distinct exercise names
+  // Distinct exercise names (only those with real sets)
   const exerciseNames = useMemo(() => {
     const set = new Set();
     for (const w of filteredLog) {
@@ -426,9 +421,7 @@ export default function ProgressTab({ db, setDb }) {
   }, [filteredLog]);
 
   const [selectedExercise, setSelectedExercise] = useState(exerciseNames[0] || "");
-
   useEffect(() => {
-    // reset selection if list changes
     if (!selectedExercise && exerciseNames.length) {
       setSelectedExercise(exerciseNames[0]);
     } else if (selectedExercise && !exerciseNames.includes(selectedExercise)) {
@@ -436,9 +429,10 @@ export default function ProgressTab({ db, setDb }) {
     }
   }, [exerciseNames]); // eslint-disable-line
 
-  // Build line series for selected exercise (session best over time)
-  const lineSeries = useMemo(() => {
-    if (!selectedExercise) return [];
+  // Build series + stats for selected exercise
+  const { lineSeries, startWeight, maxWeight, diffWeight } = useMemo(() => {
+    if (!selectedExercise) return { lineSeries: [], startWeight: 0, maxWeight: 0, diffWeight: 0 };
+
     const points = [];
     for (const w of filteredLog) {
       const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
@@ -447,43 +441,82 @@ export default function ProgressTab({ db, setDb }) {
         if (ex.name !== selectedExercise) continue;
         const realSets = getSets(ex).filter(hasRealSet);
         if (realSets.length === 0) continue;
-        const best =
-          realSets.reduce((m, s) => Math.max(m, setWeight(s)), 0) || 0;
+        const best = realSets.reduce((m, s) => Math.max(m, setWeight(s)), 0);
         points.push({ date: isoDate(when), weight: best });
       }
     }
-    // combine by date: take max per day
+    // combine by date (max per day)
     const byDate = new Map();
     for (const p of points) {
       byDate.set(p.date, Math.max(byDate.get(p.date) || 0, p.weight));
     }
-    return Array.from(byDate.entries())
+    const series = Array.from(byDate.entries())
       .map(([date, weight]) => ({ date, weight }))
       .sort((a, b) => a.date.localeCompare(b.date));
+
+    const start = series.length ? series[0].weight : 0;
+    const max = series.reduce((m, p) => Math.max(m, p.weight), 0);
+    return { lineSeries: series, startWeight: start, maxWeight: max, diffWeight: max - start };
   }, [filteredLog, selectedExercise]);
+
+  // KPIs: last 7 & 30 days (meaningful workouts only)
+  const { recent7, recent30 } = useMemo(() => {
+    const now = new Date();
+    let last7 = 0,
+      last30 = 0;
+    for (const w of filteredLog) {
+      const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || null;
+      if (!when) continue;
+      const diff = daysBetween(when, now);
+      if (diff <= 7) last7++;
+      if (diff <= 30) last30++;
+    }
+    return { recent7: last7, recent30: last30 };
+  }, [filteredLog]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
-      {/* Exercise Selector + Line Chart */}
+      {/* TOP: Exercise selector (readable) + stats block */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">Max Weight Progress</h3>
           <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-500">Exercise</label>
+            <label className="text-sm text-gray-600">Exercise</label>
             <select
               value={selectedExercise}
               onChange={(e) => setSelectedExercise(e.target.value)}
-              className="rounded border border-gray-300 px-2 py-1 text-sm"
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm sm:text-base text-gray-900"
             >
               {exerciseNames.map((name) => (
-                <option key={name} value={name}>
+                <option key={name} value={name} className="text-gray-900">
                   {name}
                 </option>
               ))}
             </select>
           </div>
         </div>
-        <div className="h-64 w-full">
+
+        {/* Stats block for selected exercise */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs text-gray-600">Starting Weight</p>
+            <p className="mt-1 text-2xl font-semibold">{startWeight}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs text-gray-600">Current Max</p>
+            <p className="mt-1 text-2xl font-semibold">{maxWeight}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs text-gray-600">Difference</p>
+            <p className={`mt-1 text-2xl font-semibold ${diffWeight >= 0 ? "text-green-600" : "text-red-600"}`}>
+              {diffWeight >= 0 ? "+" : ""}
+              {diffWeight}
+            </p>
+          </div>
+        </div>
+
+        {/* Line chart */}
+        <div className="mt-4 h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={lineSeries} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -496,7 +529,19 @@ export default function ProgressTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* Last 5, with date + Morning/Evening + Day # and modal for edit */}
+      {/* KPIs: Last 7 / Last 30 */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 7 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent7}</p>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 30 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent30}</p>
+        </div>
+      </div>
+
+      {/* Last 5 Saved Workouts (cloud) with View more → editable modal */}
       <RecentWorkoutsCloud programs={programs} setDb={setDb} />
     </div>
   );
