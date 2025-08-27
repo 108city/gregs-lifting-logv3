@@ -1,144 +1,255 @@
+// src/tabs/ProgressTab.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
 
-const fmt = (n) => (Number.isFinite(n) ? Number(n).toFixed(1) : "0.0");
-
-// Build time series of {date, max} for a given exerciseId from db.log (all programs)
-function buildTrendFromLog(db, exerciseId) {
-  if (!exerciseId) return [];
-  const byDate = new Map(); // date -> max kg that date
-  const sessions = Array.isArray(db?.log) ? db.log : [];
-
-  for (const s of sessions) {
-    const date = s?.date;
-    if (!date || !Array.isArray(s?.entries)) continue;
-
-    let maxThisSession = 0;
-    for (const e of s.entries) {
-      if (e?.exerciseId !== exerciseId || !Array.isArray(e?.sets)) continue;
-      for (const st of e.sets) {
-        const kg = Number(st?.kg) || 0;
-        if (kg > maxThisSession) maxThisSession = kg;
-      }
-    }
-    if (maxThisSession > 0) {
-      const prev = byDate.get(date) || 0;
-      byDate.set(date, Math.max(prev, maxThisSession));
-    }
-  }
-
-  return Array.from(byDate.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, max]) => ({ date, max }));
+/* ===============================
+   Helpers
+   =============================== */
+function startOfDay(d = new Date()) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function daysBetween(a, b) {
+  return Math.floor((startOfDay(b) - startOfDay(a)) / (1000 * 60 * 60 * 24));
+}
+function isoDate(d = new Date()) {
+  return new Date(d).toISOString().slice(0, 10);
 }
 
-export default function ProgressTab({ db }) {
-  const exercises = Array.isArray(db?.exercises) ? db.exercises : [];
+function toDate(val) {
+  if (!val) return null;
+  const d = typeof val === "string" || typeof val === "number" ? new Date(val) : val;
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
-  // Exercise selection (across ALL programs)
-  const exerciseOptions = useMemo(
-    () => exercises.slice().sort((a, b) => a.name.localeCompare(b.name)),
-    [exercises]
-  );
+function byNewest(a, b) {
+  const ka = toDate(a?.date || a?.endedAt || a?.startedAt || 0)?.getTime() ?? 0;
+  const kb = toDate(b?.date || b?.endedAt || b?.startedAt || 0)?.getTime() ?? 0;
+  return kb - ka;
+}
 
-  const [exerciseId, setExerciseId] = useState(exerciseOptions[0]?.id || "");
+function formatDate(d) {
+  const dt = toDate(d);
+  if (!dt) return "Unknown date";
+  return dt.toLocaleString(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/* ===============================
+   Recent Cloud Workouts (inline)
+   - Loads Supabase "main" row or uses your syncService.loadFromCloud if present
+   - Shows last 5 workouts if the DB actually has any
+   - Renders null if none (keeps Progress tab clean)
+   =============================== */
+function RecentWorkoutsCloud({ onOpen }) {
+  const [items, setItems] = useState(null); // null loading, [] empty
+
   useEffect(() => {
-    if (!exerciseId && exerciseOptions[0]?.id) {
-      setExerciseId(exerciseOptions[0].id);
-    } else if (exerciseId && !exerciseOptions.find((e) => e.id === exerciseId)) {
-      setExerciseId(exerciseOptions[0]?.id || "");
+    let alive = true;
+
+    async function fetchCloudLog() {
+      // Try your syncService first (if it exists in your project)
+      try {
+        const m = await import("../syncService.js");
+        if (m && typeof m.loadFromCloud === "function") {
+          const cloud = await m.loadFromCloud();
+          const log = Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
+          return log;
+        }
+      } catch {
+        // ignore and fallback to direct client
+      }
+
+      // Fallback: query Supabase directly
+      const { supabase } = await import("../supabaseClient.js");
+      const { data, error } = await supabase
+        .from("lifting_logs")
+        .select("data, updated_at")
+        .eq("id", "main")
+        .maybeSingle();
+
+      if (error) throw error;
+      const log = Array.isArray(data?.data?.log) ? data.data.log : [];
+      return log;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exerciseOptions]);
 
-  const exercise = exerciseOptions.find((e) => e.id === exerciseId) || null;
+    (async () => {
+      try {
+        const log = await fetchCloudLog();
+        if (!alive) return;
 
-  // Build trend data across ALL sessions
-  const trend = useMemo(() => buildTrendFromLog(db, exerciseId), [db, exerciseId]);
+        if (!Array.isArray(log) || log.length === 0) {
+          setItems([]); // render nothing
+          return;
+        }
+        const sorted = [...log].sort(byNewest);
+        setItems(sorted.slice(0, 5));
+      } catch (e) {
+        console.error("[RecentWorkoutsCloud] Load failed:", e?.message || e);
+        setItems([]); // fail quietly: render nothing
+      }
+    })();
 
-  const startMax = trend.length ? trend[0].max : 0;
-  const latestMax = trend.length ? trend[trend.length - 1].max : 0;
-  const totalGain = latestMax - startMax;
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (!items || items.length === 0) return null;
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold">Progress (All Programs)</h2>
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-base font-semibold">Last 5 Saved Workouts</h3>
+      </div>
 
-      {/* Exercise Picker */}
-      <div className="space-y-1">
-        <label className="text-sm text-zinc-300">Exercise</label>
-        <select
-          value={exerciseId}
-          onChange={(e) => setExerciseId(e.target.value)}
-          className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
-        >
-          {exerciseOptions.length === 0 && <option value="">No exercises</option>}
-          {exerciseOptions.map((ex) => (
-            <option key={ex.id} value={ex.id}>
-              {ex.name}
-            </option>
+      <div className="grid gap-3">
+        {items.map((w, idx) => {
+          const exCount = (w.exercises || []).length;
+          const setCount = (w.exercises || []).reduce(
+            (acc, e) => acc + (e.sets?.length || 0),
+            0
+          );
+
+          return (
+            <button
+              type="button"
+              key={w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`}
+              onClick={() => onOpen && onOpen(w)}
+              className="text-left rounded-xl border border-gray-200 p-3 transition hover:shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs text-gray-500">Workout</p>
+                  <p className="text-sm font-medium">
+                    {formatDate(w.date || w.endedAt || w.startedAt)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {exCount} exercise{exCount === 1 ? "" : "s"} · {setCount} set
+                    {setCount === 1 ? "" : "s"} {w.completed ? "· ✅" : "· ⏸️"}
+                  </p>
+                </div>
+                <div className="shrink-0 rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-700">
+                  View
+                </div>
+              </div>
+
+              {(w.exercises || []).slice(0, 3).map((ex, i) => (
+                <div key={ex.id || i} className="mt-2 text-sm">
+                  <span className="font-medium">{ex.name}</span>
+                  <span className="text-gray-500"> — {(ex.sets || []).length} sets</span>
+                </div>
+              ))}
+
+              {(w.exercises || []).length > 3 && (
+                <div className="mt-1 text-xs text-gray-500">
+                  +{(w.exercises || []).length - 3} more…
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ===============================
+   ProgressTab
+   - Shows simple stats from local db
+   - Includes RecentWorkoutsCloud (hidden if DB empty)
+   =============================== */
+export default function ProgressTab({ db, onOpenWorkout }) {
+  const log = db?.log || [];
+
+  // Basic stats from local data
+  const { totalWorkouts, recent7, recent30 } = useMemo(() => {
+    const now = new Date();
+    const total = log.length;
+
+    let last7 = 0;
+    let last30 = 0;
+
+    for (const w of log) {
+      const when =
+        toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || null;
+      if (!when) continue;
+      const diff = daysBetween(when, now);
+      if (diff <= 7) last7++;
+      if (diff <= 30) last30++;
+    }
+    return { totalWorkouts: total, recent7: last7, recent30: last30 };
+  }, [log]);
+
+  // Trend by ISO date (local only)
+  const trend = useMemo(() => {
+    // group by ISO yyyy-mm-dd from local log
+    const map = new Map();
+    for (const w of log) {
+      const d =
+        isoDate(toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || new Date());
+      map.set(d, (map.get(d) || 0) + 1);
+    }
+    // last 14 days sparkline-like array
+    const out = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const k = isoDate(d);
+      out.push({ date: k, count: map.get(k) || 0 });
+    }
+    return out;
+  }, [log]);
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6 p-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">Progress</h1>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Total Workouts</p>
+          <p className="mt-1 text-2xl font-semibold">{totalWorkouts}</p>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Last 7 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent7}</p>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Last 30 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent30}</p>
+        </div>
+      </div>
+
+      {/* Simple 14-day trend (textual – keeps it dependency-free) */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+        <p className="text-sm font-medium">14-Day Activity</p>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {trend.map((t) => (
+            <div
+              key={t.date}
+              className={`h-8 w-8 rounded-md border text-center text-xs leading-8 ${
+                t.count > 0 ? "bg-green-100 border-green-200" : "bg-gray-50 border-gray-200"
+              }`}
+              title={`${t.date}: ${t.count}`}
+            >
+              {t.count}
+            </div>
           ))}
-        </select>
-      </div>
-
-      {/* Chart */}
-      <div className="h-64 bg-zinc-950 rounded border border-zinc-800 p-2">
-        {trend.length === 0 ? (
-          <div className="h-full grid place-items-center text-sm text-zinc-400">
-            No logged sets for {exercise ? exercise.name : "this exercise"} yet.
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={trend} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 12 }}
-                angle={-20}
-                textAnchor="end"
-                height={40}
-              />
-              <YAxis
-                tick={{ fontSize: 12 }}
-                domain={[
-                  (dataMin) => Math.floor((dataMin || 0) - 2),
-                  (dataMax) => Math.ceil((dataMax || 0) + 5),
-                ]}
-              />
-              <Tooltip formatter={(v) => `${v} kg`} />
-              <Line type="monotone" dataKey="max" dot={false} strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded bg-zinc-900 border border-zinc-800 p-3">
-          <div className="text-xs text-zinc-400">Start Max</div>
-          <div className="text-xl">{fmt(startMax)} kg</div>
-        </div>
-        <div className="rounded bg-zinc-900 border border-zinc-800 p-3">
-          <div className="text-xs text-zinc-400">Latest Max</div>
-          <div className="text-xl">{fmt(latestMax)} kg</div>
-        </div>
-        <div className="rounded bg-zinc-900 border border-zinc-800 p-3">
-          <div className="text-xs text-zinc-400">Total Gain</div>
-          <div className="text-xl">{fmt(totalGain)} kg</div>
         </div>
       </div>
 
-      <div className="text-xs text-zinc-400">
-        Tip: For each date we take the heaviest set you logged for the selected exercise, across all programs.
-      </div>
+      {/* Cloud-backed: Only shows if something was saved to DB */}
+      <RecentWorkoutsCloud onOpen={onOpenWorkout} />
     </div>
   );
 }
