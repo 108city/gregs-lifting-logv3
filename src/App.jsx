@@ -1,94 +1,149 @@
-import React, { useEffect, useRef, useState } from "react";
-import { loadFromCloud, saveToCloudDebounced } from "./syncService";
-import Tabs, { TabsList, TabsTrigger, TabsContent } from "./tabs/Tabs";
-import LogTab from "./tabs/LogTab";
-import ProgressTab from "./tabs/ProgressTab";
-import ProgramTab from "./tabs/ProgramTab";
-import ExercisesTab from "./tabs/ExercisesTab";
+// src/App.jsx
+import React, { useEffect, useState } from "react";
+import { loadDbFromCloud, saveDbToCloud } from "./syncService.js";
+import LogTab from "./tabs/LogTab.jsx";
+import ProgressTab from "./tabs/ProgressTab.jsx";
 
-const STORAGE_KEY = "gregs-lifting-log";
+// --- Minimal global app state shape ---
+// db = { programs: Program[], activeProgramId: string|null, log: Workout[] }
 
 export default function App() {
-  const [db, setDb] = useState(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw
-        ? JSON.parse(raw)
-        : { exercises: [], programs: [], log: [], progress: [], activeProgramId: null };
-    } catch {
-      return { exercises: [], programs: [], log: [], progress: [], activeProgramId: null };
-    }
-  });
+  const [db, setDb] = useState(() => ({
+    programs: [],
+    activeProgramId: null,
+    log: [],
+  }));
 
-  const [activeTab, setActiveTab] = useState("log");
-  const hasHydratedFromCloud = useRef(false); // prevents first-render overwrite
+  const [tab, setTab] = useState("log"); // "log" | "progress"
+  const [loadingCloud, setLoadingCloud] = useState(true);
+  const [savingCloud, setSavingCloud] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
 
-  // 1) Hydrate from cloud at startup
+  // ---------------- Load once from cloud on mount ----------------
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
     (async () => {
       try {
-        const cloud = await loadFromCloud();
-        if (!mounted) return;
-
-        // If cloud has data, prefer it over local (so redeploys pull your state)
-        if (cloud?.data && Object.keys(cloud.data).length) {
-          setDb(cloud.data);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud.data));
+        const cloud = await loadDbFromCloud();
+        if (alive && cloud && typeof cloud === "object") {
+          // shallow-merge to keep any local defaults if cloud misses fields
+          setDb((prev) => ({
+            ...prev,
+            ...cloud,
+            programs: Array.isArray(cloud.programs) ? cloud.programs : prev.programs,
+            log: Array.isArray(cloud.log) ? cloud.log : prev.log,
+            activeProgramId:
+              cloud.activeProgramId !== undefined ? cloud.activeProgramId : prev.activeProgramId,
+          }));
         }
       } catch (e) {
-        console.warn("Cloud load failed:", e.message);
+        console.error("[App] initial cloud load failed:", e?.message || e);
       } finally {
-        hasHydratedFromCloud.current = true;
+        if (alive) setLoadingCloud(false);
       }
     })();
     return () => {
-      mounted = false;
+      alive = false;
     };
   }, []);
 
-  // 2) Persist every change locally + debounce save to Supabase
+  // ---------------- Debounced autosave to cloud on any db change ----------------
   useEffect(() => {
-    // Always keep a local copy
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-    } catch {}
+    // Skip autosave until initial load finishes
+    if (loadingCloud) return;
+    setSavingCloud(true);
+    const handle = setTimeout(() => {
+      (async () => {
+        try {
+          await saveDbToCloud(db);
+          setLastSavedAt(new Date());
+        } catch (e) {
+          console.error("[App] autosave failed:", e?.message || e);
+        } finally {
+          setSavingCloud(false);
+        }
+      })();
+    }, 600); // debounce 600ms
 
-    // Don’t push an initial empty/partial state before we’ve checked the cloud
-    if (!hasHydratedFromCloud.current) return;
+    return () => clearTimeout(handle);
+  }, [db, loadingCloud]);
 
-    // Debounced cloud save
-    saveToCloudDebounced(db);
-  }, [db]);
+  // ---------------- Refresh from cloud when the window regains focus ----------------
+  useEffect(() => {
+    const onFocus = async () => {
+      try {
+        const cloud = await loadDbFromCloud();
+        if (cloud && typeof cloud === "object") {
+          setDb((prev) => ({
+            ...prev,
+            ...cloud,
+            programs: Array.isArray(cloud.programs) ? cloud.programs : prev.programs,
+            log: Array.isArray(cloud.log) ? cloud.log : prev.log,
+            activeProgramId:
+              cloud.activeProgramId !== undefined ? cloud.activeProgramId : prev.activeProgramId,
+          }));
+        }
+      } catch (e) {
+        console.error("[App] focus refresh failed:", e?.message || e);
+      }
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") onFocus();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  // ---------------- Tiny tab bar (you can replace with your own layout/router) ----------------
+  const TabButton = ({ id, children }) => (
+    <button
+      onClick={() => setTab(id)}
+      className={`px-3 py-2 rounded-lg text-sm border ${
+        tab === id ? "bg-white text-black border-gray-300" : "bg-zinc-900 text-white border-zinc-700"
+      }`}
+    >
+      {children}
+    </button>
+  );
 
   return (
-    <div className="min-h-screen bg-black text-blue-500 p-4">
-      <h1 className="text-3xl font-bold mb-6">Greg&apos;s Lifting Log</h1>
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      {/* Header */}
+      <div className="mx-auto max-w-5xl px-4 pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">Lifting Log</h1>
+          <div className="flex items-center gap-2">
+            <TabButton id="log">Log</TabButton>
+            <TabButton id="progress">Progress</TabButton>
+          </div>
+        </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-4">
-          <TabsTrigger value="log">Log</TabsTrigger>
-          <TabsTrigger value="progress">Progress</TabsTrigger>
-          <TabsTrigger value="program">Program</TabsTrigger>
-          <TabsTrigger value="exercises">Exercises</TabsTrigger>
-        </TabsList>
+        {/* sync status (subtle) */}
+        <div className="mt-2 text-xs text-zinc-400">
+          {loadingCloud
+            ? "Loading from cloud…"
+            : savingCloud
+            ? "Saving changes…"
+            : lastSavedAt
+            ? `Saved: ${lastSavedAt.toLocaleTimeString()}`
+            : "Loaded"}
+        </div>
+      </div>
 
-        <TabsContent value="log">
+      {/* Content */}
+      <div className="mx-auto max-w-5xl p-4">
+        {tab === "log" ? (
           <LogTab db={db} setDb={setDb} />
-        </TabsContent>
-
-        <TabsContent value="progress">
-          <ProgressTab db={db} />
-        </TabsContent>
-
-        <TabsContent value="program">
-          <ProgramTab db={db} setDb={setDb} />
-        </TabsContent>
-
-        <TabsContent value="exercises">
-          <ExercisesTab db={db} setDb={setDb} />
-        </TabsContent>
-      </Tabs>
+        ) : (
+          <ProgressTab db={db} setDb={setDb} />
+        )}
+      </div>
     </div>
   );
 }
