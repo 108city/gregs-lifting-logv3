@@ -1,86 +1,72 @@
-// src/components/RecentWorkoutsCloud.jsx
-import React, { useEffect, useMemo, useState } from "react";
+function RecentWorkoutsCloud({ onOpen }) {
+  const [items, setItems] = useState(null); // null loading, [] empty
 
-// Try to use your existing loadFromCloud (if you have it). Fallback to direct Supabase.
-let externalLoadFromCloud = null;
-try {
-  // If you already have: export async function loadFromCloud() {...}
-  // in src/syncService.js, this will succeed.
-  const m = await import("../syncService.js");
-  if (m && typeof m.loadFromCloud === "function") externalLoadFromCloud = m.loadFromCloud;
-} catch {
-  // ignore; we'll use direct Supabase below
-}
+  // A set counts as meaningful if it has any signal: reps>0, weight>0, rpe>0, or notes text
+  const hasMeaningfulSet = (s) =>
+    (Number(s?.reps) || 0) > 0 ||
+    (Number(s?.weight) || 0) > 0 ||
+    (Number(s?.rpe) || 0) > 0 ||
+    (typeof s?.notes === "string" && s.notes.trim().length > 0);
 
-async function fetchCloudLog() {
-  if (externalLoadFromCloud) {
-    const cloud = await externalLoadFromCloud();
-    const data = cloud?.data ?? {};
-    const log = Array.isArray(data?.log) ? data.log : [];
-    return log;
-  }
-  // Fallback: direct Supabase query to the single-row 'main'
-  const { supabase } = await import("../supabaseClient.js");
-  const { data, error } = await supabase
-    .from("lifting_logs")
-    .select("data, updated_at")
-    .eq("id", "main")
-    .maybeSingle();
-
-  if (error) throw error;
-  const log = Array.isArray(data?.data?.log) ? data.data.log : [];
-  return log;
-}
-
-function formatDate(d) {
-  if (!d) return "Unknown date";
-  const dt = typeof d === "string" || typeof d === "number" ? new Date(d) : d;
-  if (Number.isNaN(dt.getTime())) return "Unknown date";
-  return dt.toLocaleString(undefined, {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function byNewest(a, b) {
-  const ka = new Date(a?.date || a?.endedAt || a?.startedAt || 0).getTime();
-  const kb = new Date(b?.date || b?.endedAt || b?.startedAt || 0).getTime();
-  return kb - ka;
-}
-
-export default function RecentWorkoutsCloud() {
-  const [items, setItems] = useState(null); // null = loading, [] = loaded empty
+  const hasMeaningfulWorkout = (w) => {
+    const exs = Array.isArray(w?.exercises) ? w.exercises : [];
+    if (exs.length === 0) return false;
+    // At least one exercise with at least one meaningful set
+    return exs.some((ex) => Array.isArray(ex?.sets) && ex.sets.some(hasMeaningfulSet));
+  };
 
   useEffect(() => {
     let alive = true;
+
+    async function fetchCloudLog() {
+      try {
+        const m = await import("../syncService.js");
+        if (m && typeof m.loadFromCloud === "function") {
+          const cloud = await m.loadFromCloud();
+          const log = Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
+          return log;
+        }
+      } catch {
+        /* fall through */
+      }
+
+      const { supabase } = await import("../supabaseClient.js");
+      const { data, error } = await supabase
+        .from("lifting_logs")
+        .select("data, updated_at")
+        .eq("id", "main")
+        .maybeSingle();
+
+      if (error) throw error;
+      return Array.isArray(data?.data?.log) ? data.data.log : [];
+    }
+
     (async () => {
       try {
         const log = await fetchCloudLog();
         if (!alive) return;
 
-        // Only show if there is truly something saved in DB
-        if (!Array.isArray(log) || log.length === 0) {
-          setItems([]); // show nothing (component returns null)
+        // Keep only workouts with actual content
+        const cleaned = (Array.isArray(log) ? log : []).filter(hasMeaningfulWorkout);
+
+        if (cleaned.length === 0) {
+          setItems([]); // render nothing
           return;
         }
 
-        const sorted = [...log].sort(byNewest);
+        const sorted = [...cleaned].sort(byNewest);
         setItems(sorted.slice(0, 5));
       } catch (e) {
         console.error("[RecentWorkoutsCloud] Load failed:", e?.message || e);
-        setItems([]); // fail quietly: show nothing
+        setItems([]); // fail quietly: render nothing
       }
     })();
+
     return () => {
       alive = false;
     };
   }, []);
 
-  // If nothing saved in DB (or still loading), render nothing to keep Progress clean
   if (!items || items.length === 0) return null;
 
   return (
@@ -96,10 +82,13 @@ export default function RecentWorkoutsCloud() {
             (acc, e) => acc + (e.sets?.length || 0),
             0
           );
+
           return (
-            <div
+            <button
+              type="button"
               key={w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`}
-              className="rounded-xl border border-gray-200 p-3"
+              onClick={() => onOpen && onOpen(w)}
+              className="text-left rounded-xl border border-gray-200 p-3 transition hover:shadow-sm"
             >
               <div className="flex items-center justify-between gap-4">
                 <div>
@@ -111,6 +100,9 @@ export default function RecentWorkoutsCloud() {
                     {exCount} exercise{exCount === 1 ? "" : "s"} · {setCount} set
                     {setCount === 1 ? "" : "s"} {w.completed ? "· ✅" : "· ⏸️"}
                   </p>
+                </div>
+                <div className="shrink-0 rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-700">
+                  View
                 </div>
               </div>
 
@@ -126,7 +118,7 @@ export default function RecentWorkoutsCloud() {
                   +{(w.exercises || []).length - 3} more…
                 </div>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
