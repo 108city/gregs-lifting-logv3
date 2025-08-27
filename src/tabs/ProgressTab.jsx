@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 /* ===============================
-   Helpers
+   Common helpers
    =============================== */
 function startOfDay(d = new Date()) {
   const x = new Date(d);
@@ -15,19 +15,16 @@ function daysBetween(a, b) {
 function isoDate(d = new Date()) {
   return new Date(d).toISOString().slice(0, 10);
 }
-
 function toDate(val) {
   if (!val) return null;
   const d = typeof val === "string" || typeof val === "number" ? new Date(val) : val;
   return Number.isNaN(d.getTime()) ? null : d;
 }
-
 function byNewest(a, b) {
   const ka = toDate(a?.date || a?.endedAt || a?.startedAt || 0)?.getTime() ?? 0;
   const kb = toDate(b?.date || b?.endedAt || b?.startedAt || 0)?.getTime() ?? 0;
   return kb - ka;
 }
-
 function formatDate(d) {
   const dt = toDate(d);
   if (!dt) return "Unknown date";
@@ -43,18 +40,32 @@ function formatDate(d) {
 
 /* ===============================
    Recent Cloud Workouts (inline)
-   - Loads Supabase "main" row or uses your syncService.loadFromCloud if present
-   - Shows last 5 workouts if the DB actually has any
-   - Renders null if none (keeps Progress tab clean)
+   Strict filter: show only completed workouts with real sets.
    =============================== */
 function RecentWorkoutsCloud({ onOpen }) {
-  const [items, setItems] = useState(null); // null loading, [] empty
+  const [items, setItems] = useState(null); // null=loading, []=none/show nothing
+
+  // A set is meaningful if BOTH reps>0 and weight>0, or notes has text
+  const hasRealSet = (s) => {
+    const reps = Number(s?.reps || 0);
+    const weight = Number(s?.weight || 0);
+    const notesOk = typeof s?.notes === "string" && s.notes.trim().length > 0;
+    return ((reps > 0 && weight > 0) || notesOk);
+  };
+
+  const hasMeaningfulWorkout = (w) => {
+    if (!w || w.completed !== true) return false; // must be completed
+    const exs = Array.isArray(w.exercises) ? w.exercises : [];
+    if (exs.length === 0) return false;
+    // At least one exercise with at least one "real" set
+    return exs.some((ex) => Array.isArray(ex?.sets) && ex.sets.some(hasRealSet));
+  };
 
   useEffect(() => {
     let alive = true;
 
     async function fetchCloudLog() {
-      // Try your syncService first (if it exists in your project)
+      // Prefer your syncService if present
       try {
         const m = await import("../syncService.js");
         if (m && typeof m.loadFromCloud === "function") {
@@ -63,20 +74,17 @@ function RecentWorkoutsCloud({ onOpen }) {
           return log;
         }
       } catch {
-        // ignore and fallback to direct client
+        /* ignore */
       }
-
-      // Fallback: query Supabase directly
+      // Fallback to direct Supabase (single-row 'main')
       const { supabase } = await import("../supabaseClient.js");
       const { data, error } = await supabase
         .from("lifting_logs")
         .select("data, updated_at")
         .eq("id", "main")
         .maybeSingle();
-
       if (error) throw error;
-      const log = Array.isArray(data?.data?.log) ? data.data.log : [];
-      return log;
+      return Array.isArray(data?.data?.log) ? data.data.log : [];
     }
 
     (async () => {
@@ -84,15 +92,19 @@ function RecentWorkoutsCloud({ onOpen }) {
         const log = await fetchCloudLog();
         if (!alive) return;
 
-        if (!Array.isArray(log) || log.length === 0) {
+        // STRICT FILTER here
+        const cleaned = (Array.isArray(log) ? log : []).filter(hasMeaningfulWorkout);
+
+        if (cleaned.length === 0) {
           setItems([]); // render nothing
           return;
         }
-        const sorted = [...log].sort(byNewest);
+
+        const sorted = [...cleaned].sort(byNewest);
         setItems(sorted.slice(0, 5));
       } catch (e) {
         console.error("[RecentWorkoutsCloud] Load failed:", e?.message || e);
-        setItems([]); // fail quietly: render nothing
+        setItems([]); // render nothing on failure
       }
     })();
 
@@ -116,7 +128,6 @@ function RecentWorkoutsCloud({ onOpen }) {
             (acc, e) => acc + (e.sets?.length || 0),
             0
           );
-
           return (
             <button
               type="button"
@@ -132,7 +143,7 @@ function RecentWorkoutsCloud({ onOpen }) {
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">
                     {exCount} exercise{exCount === 1 ? "" : "s"} · {setCount} set
-                    {setCount === 1 ? "" : "s"} {w.completed ? "· ✅" : "· ⏸️"}
+                    {setCount === 1 ? "" : "s"} · ✅
                   </p>
                 </div>
                 <div className="shrink-0 rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-700">
@@ -143,7 +154,10 @@ function RecentWorkoutsCloud({ onOpen }) {
               {(w.exercises || []).slice(0, 3).map((ex, i) => (
                 <div key={ex.id || i} className="mt-2 text-sm">
                   <span className="font-medium">{ex.name}</span>
-                  <span className="text-gray-500"> — {(ex.sets || []).length} sets</span>
+                  <span className="text-gray-500">
+                    {" "}
+                    — {(ex.sets || []).filter(s => Number(s?.reps||0)>0 && Number(s?.weight||0)>0).length} real sets
+                  </span>
                 </div>
               ))}
 
@@ -162,8 +176,6 @@ function RecentWorkoutsCloud({ onOpen }) {
 
 /* ===============================
    ProgressTab
-   - Shows simple stats from local db
-   - Includes RecentWorkoutsCloud (hidden if DB empty)
    =============================== */
 export default function ProgressTab({ db, onOpenWorkout }) {
   const log = db?.log || [];
@@ -172,7 +184,6 @@ export default function ProgressTab({ db, onOpenWorkout }) {
   const { totalWorkouts, recent7, recent30 } = useMemo(() => {
     const now = new Date();
     const total = log.length;
-
     let last7 = 0;
     let last30 = 0;
 
@@ -189,14 +200,12 @@ export default function ProgressTab({ db, onOpenWorkout }) {
 
   // Trend by ISO date (local only)
   const trend = useMemo(() => {
-    // group by ISO yyyy-mm-dd from local log
     const map = new Map();
     for (const w of log) {
       const d =
         isoDate(toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || new Date());
       map.set(d, (map.get(d) || 0) + 1);
     }
-    // last 14 days sparkline-like array
     const out = [];
     for (let i = 13; i >= 0; i--) {
       const d = new Date();
@@ -230,7 +239,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
         </div>
       </div>
 
-      {/* Simple 14-day trend (textual – keeps it dependency-free) */}
+      {/* Simple 14-day trend (textual) */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <p className="text-sm font-medium">14-Day Activity</p>
         <div className="mt-2 flex flex-wrap gap-1">
@@ -248,7 +257,7 @@ export default function ProgressTab({ db, onOpenWorkout }) {
         </div>
       </div>
 
-      {/* Cloud-backed: Only shows if something was saved to DB */}
+      {/* Cloud-backed list: shows only if DB has real saved workouts */}
       <RecentWorkoutsCloud onOpen={onOpenWorkout} />
     </div>
   );
