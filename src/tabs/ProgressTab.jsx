@@ -514,8 +514,8 @@ function TwoWeekCalendar({ workouts }) {
   const rows = [days.slice(0, 7), days.slice(7)];
 
   const cellBase =
-    "h-16 rounded-xl border flex flex-col items-center justify-center gap-1 " +
-    "text-sm";
+    "h-16 rounded-xl border flex flex-col items-center justify-center gap-1 p-2 " +
+    "text-sm"; // 👈 added p-2 for padding
   const labelCls = "text-[11px] text-gray-500";
 
   return (
@@ -552,7 +552,7 @@ function TwoWeekCalendar({ workouts }) {
           return (
             <div
               key={`r2-${i}`}
-              className={`${cellBase} ${didWork ? "border-green-2 00 bg-green-50" : "border-gray-200 bg-gray-50"}`}
+              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"}`}
               title={k}
             >
               <div className="text-base">{didWork ? "💪" : "😴"}</div>
@@ -567,7 +567,6 @@ function TwoWeekCalendar({ workouts }) {
     </div>
   );
 }
-
 /* ───────────────────────── Main ProgressTab ───────────────────────── */
 export default function ProgressTab({ db, setDb }) {
   const log = db?.log || [];
