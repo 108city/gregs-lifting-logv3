@@ -3,39 +3,72 @@ import React, { useEffect, useState } from "react";
 import { loadDbFromCloud, saveDbToCloud } from "./syncService.js";
 import LogTab from "./tabs/LogTab.jsx";
 import ProgressTab from "./tabs/ProgressTab.jsx";
+import ProgramTab from "./tabs/ProgramTab.jsx"; // <- bring back Programs tab
 
-// --- Minimal global app state shape ---
-// db = { programs: Program[], activeProgramId: string|null, log: Workout[] }
+// Keys for local backup
+const LS_KEY = "liftinglog_db_v1";
+
+// Utility: shallow-merge cloud -> local, only if cloud has meaningful data
+function mergeCloudIntoLocal(localDb, cloudDb) {
+  if (!cloudDb || typeof cloudDb !== "object") return localDb;
+
+  const hasCloudPrograms = Array.isArray(cloudDb.programs) && cloudDb.programs.length > 0;
+  const hasCloudLog = Array.isArray(cloudDb.log) && cloudDb.log.length > 0;
+
+  // Only take cloud if it actually contains something
+  if (!hasCloudPrograms && !hasCloudLog && cloudDb.activeProgramId == null) {
+    return localDb;
+  }
+
+  const merged = {
+    ...localDb,
+    ...cloudDb,
+    programs: hasCloudPrograms ? cloudDb.programs : localDb.programs,
+    log: hasCloudLog ? cloudDb.log : localDb.log,
+    activeProgramId:
+      cloudDb.activeProgramId !== undefined ? cloudDb.activeProgramId : localDb.activeProgramId,
+  };
+
+  // Backfill activeProgramId if still missing but programs exist
+  if (!merged.activeProgramId && Array.isArray(merged.programs) && merged.programs.length > 0) {
+    merged.activeProgramId = merged.programs[0].id;
+  }
+
+  return merged;
+}
 
 export default function App() {
-  const [db, setDb] = useState(() => ({
-    programs: [],
-    activeProgramId: null,
-    log: [],
-  }));
+  // 1) Initialize from localStorage backup to avoid blank UI
+  const [db, setDb] = useState(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Ensure shape
+        return {
+          programs: Array.isArray(parsed.programs) ? parsed.programs : [],
+          activeProgramId: parsed.activeProgramId ?? null,
+          log: Array.isArray(parsed.log) ? parsed.log : [],
+        };
+      }
+    } catch {}
+    return { programs: [], activeProgramId: null, log: [] };
+  });
 
-  const [tab, setTab] = useState("log"); // "log" | "progress"
+  const [tab, setTab] = useState("log"); // "log" | "progress" | "program"
   const [loadingCloud, setLoadingCloud] = useState(true);
   const [savingCloud, setSavingCloud] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
-  // ---------------- Load once from cloud on mount ----------------
+  // 2) Load from cloud on mount but don't wipe local if cloud is empty
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const cloud = await loadDbFromCloud();
-        if (alive && cloud && typeof cloud === "object") {
-          // shallow-merge to keep any local defaults if cloud misses fields
-          setDb((prev) => ({
-            ...prev,
-            ...cloud,
-            programs: Array.isArray(cloud.programs) ? cloud.programs : prev.programs,
-            log: Array.isArray(cloud.log) ? cloud.log : prev.log,
-            activeProgramId:
-              cloud.activeProgramId !== undefined ? cloud.activeProgramId : prev.activeProgramId,
-          }));
-        }
+        if (!alive) return;
+        const merged = mergeCloudIntoLocal(db, cloud);
+        setDb(merged);
       } catch (e) {
         console.error("[App] initial cloud load failed:", e?.message || e);
       } finally {
@@ -45,12 +78,29 @@ export default function App() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------------- Debounced autosave to cloud on any db change ----------------
+  // 3) Persist to localStorage on every db change (instant backup)
   useEffect(() => {
-    // Skip autosave until initial load finishes
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(db));
+    } catch {}
+  }, [db]);
+
+  // 4) Debounced autosave to cloud — only if there is content to save
+  useEffect(() => {
     if (loadingCloud) return;
+
+    const hasPrograms = Array.isArray(db.programs) && db.programs.length > 0;
+    const hasLog = Array.isArray(db.log) && db.log.length > 0;
+    const hasActive = !!db.activeProgramId;
+
+    if (!hasPrograms && !hasLog && !hasActive) {
+      // nothing meaningful to save yet
+      return;
+    }
+
     setSavingCloud(true);
     const handle = setTimeout(() => {
       (async () => {
@@ -63,35 +113,24 @@ export default function App() {
           setSavingCloud(false);
         }
       })();
-    }, 600); // debounce 600ms
+    }, 600); // debounce
 
     return () => clearTimeout(handle);
   }, [db, loadingCloud]);
 
-  // ---------------- Refresh from cloud when the window regains focus ----------------
+  // 5) Refresh from cloud on focus/visibility, but don't clobber if cloud empty
   useEffect(() => {
     const onFocus = async () => {
       try {
         const cloud = await loadDbFromCloud();
-        if (cloud && typeof cloud === "object") {
-          setDb((prev) => ({
-            ...prev,
-            ...cloud,
-            programs: Array.isArray(cloud.programs) ? cloud.programs : prev.programs,
-            log: Array.isArray(cloud.log) ? cloud.log : prev.log,
-            activeProgramId:
-              cloud.activeProgramId !== undefined ? cloud.activeProgramId : prev.activeProgramId,
-          }));
-        }
+        setDb((prev) => mergeCloudIntoLocal(prev, cloud));
       } catch (e) {
         console.error("[App] focus refresh failed:", e?.message || e);
       }
     };
-
     const onVis = () => {
       if (document.visibilityState === "visible") onFocus();
     };
-
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVis);
     return () => {
@@ -100,7 +139,7 @@ export default function App() {
     };
   }, []);
 
-  // ---------------- Tiny tab bar (you can replace with your own layout/router) ----------------
+  // Simple tab button
   const TabButton = ({ id, children }) => (
     <button
       onClick={() => setTab(id)}
@@ -121,10 +160,11 @@ export default function App() {
           <div className="flex items-center gap-2">
             <TabButton id="log">Log</TabButton>
             <TabButton id="progress">Progress</TabButton>
+            <TabButton id="program">Program</TabButton>
           </div>
         </div>
 
-        {/* sync status (subtle) */}
+        {/* sync status */}
         <div className="mt-2 text-xs text-zinc-400">
           {loadingCloud
             ? "Loading from cloud…"
@@ -138,11 +178,9 @@ export default function App() {
 
       {/* Content */}
       <div className="mx-auto max-w-5xl p-4">
-        {tab === "log" ? (
-          <LogTab db={db} setDb={setDb} />
-        ) : (
-          <ProgressTab db={db} setDb={setDb} />
-        )}
+        {tab === "log" && <LogTab db={db} setDb={setDb} />}
+        {tab === "progress" && <ProgressTab db={db} setDb={setDb} />}
+        {tab === "program" && <ProgramTab db={db} setDb={setDb} />}
       </div>
     </div>
   );
