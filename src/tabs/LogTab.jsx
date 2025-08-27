@@ -1,9 +1,10 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
 
-// ----- small helpers (same spirit as original) -----
+// ----- helpers (same spirit as your original) -----
 const todayIso = () => new Date().toISOString().slice(0, 10);
-const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+const genId = () =>
+  Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
 const clampInt = (v, min, max) => {
   const n = parseInt(v, 10);
   if (Number.isNaN(n)) return min;
@@ -60,49 +61,90 @@ const countSummary = (workout) => {
   return { exCount, setCount };
 };
 
-// ----- Celebration Modal -----
-function CelebrationModal({ open, onClose, workout, completed }) {
-  const canvasRef = useRef(null);
+/* ===============================
+   EmojiBurst (no dependencies)
+   Renders N absolutely-positioned emoji that float up and fade out.
+   =============================== */
+function EmojiBurst({ runKey, duration = 1000, count = 28 }) {
+  const containerRef = useRef(null);
+  const emojis = ["🎉", "💪", "🔥", "⭐", "🏋️", "👏", "⚡"];
 
   useEffect(() => {
-    let confetti;
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Clear any previous children
+    el.innerHTML = "";
+
+    const items = [];
+    const now = performance.now();
+    const end = now + duration;
+
+    // Create particles
+    for (let i = 0; i < count; i++) {
+      const span = document.createElement("span");
+      span.textContent = emojis[i % emojis.length];
+      span.style.position = "absolute";
+      span.style.left = Math.random() * 100 + "%";
+      span.style.bottom = "0px";
+      span.style.fontSize = 16 + Math.random() * 20 + "px";
+      span.style.opacity = "1";
+      span.style.transform = `translate(-50%, 0)`;
+      span.style.pointerEvents = "none";
+      el.appendChild(span);
+
+      // random velocity upward with slight x drift
+      const vx = (Math.random() - 0.5) * 60; // px/s sideways
+      const vy = 120 + Math.random() * 160; // px/s up
+      items.push({ node: span, vx, vy, x: 0, y: 0 });
+    }
+
     let raf;
-    (async () => {
-      if (!open) return;
-      try {
-        // lazy-load so you don’t have to install it immediately; if not present it no-ops
-        const mod = await import("canvas-confetti").catch(() => null);
-        confetti = mod?.default || null;
-        if (!confetti) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+    function tick(t) {
+      const dt = Math.min(16, t - (tick.prev || t));
+      tick.prev = t;
+      const remaining = Math.max(0, end - t);
+      const life = 1 - remaining / duration; // 0..1
 
-        const myConfetti = confetti.create(canvas, { resize: true, useWorker: true });
+      items.forEach((p) => {
+        p.x += (p.vx * dt) / 1000;
+        p.y += (p.vy * dt) / 1000;
+        p.node.style.transform = `translate(calc(-50% + ${p.x}px), -${p.y}px)`;
+        p.node.style.opacity = String(1 - life);
+      });
 
-        // quick celebratory burst
-        const end = Date.now() + 600;
-        (function frame() {
-          myConfetti({
-            particleCount: 5,
-            spread: 70,
-            origin: { y: 0.6 },
-          });
-          if (Date.now() < end) {
-            raf = requestAnimationFrame(frame);
-          }
-        })();
-      } catch {
-        /* ignore if library missing */
+      if (t < end) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        // cleanup leftovers
+        setTimeout(() => (el.innerHTML = ""), 50);
       }
-    })();
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-    };
+    }
+    raf = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(raf);
+  }, [runKey, duration, count]); // re-run burst when runKey changes
+
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-none absolute inset-0 overflow-hidden"
+    />
+  );
+}
+
+/* ===============================
+   Celebration Modal (uses EmojiBurst)
+   =============================== */
+function CelebrationModal({ open, onClose, workout, completed }) {
+  const { exCount, setCount } = countSummary(workout);
+  const [burstKey, setBurstKey] = useState(0);
+
+  useEffect(() => {
+    if (open) setBurstKey((k) => k + 1);
   }, [open]);
 
   if (!open) return null;
-
-  const { exCount, setCount } = countSummary(workout);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -111,11 +153,9 @@ function CelebrationModal({ open, onClose, workout, completed }) {
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       />
-      {/* canvas for confetti (positioned behind card but above backdrop) */}
-      <canvas
-        ref={canvasRef}
-        className="pointer-events-none absolute inset-0"
-      />
+      {/* emoji burst layer */}
+      <EmojiBurst runKey={burstKey} duration={1100} count={34} />
+
       {/* card */}
       <div className="relative z-10 w-[min(92vw,520px)] rounded-2xl border border-green-200 bg-white p-5 shadow-2xl">
         <div className="flex items-center gap-3">
@@ -132,8 +172,10 @@ function CelebrationModal({ open, onClose, workout, completed }) {
 
         <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm text-gray-700">
           <p>
-            Logged <span className="font-medium">{exCount}</span> exercise{exCount === 1 ? "" : "s"} and{" "}
-            <span className="font-medium">{setCount}</span> set{setCount === 1 ? "" : "s"}.
+            Logged <span className="font-medium">{exCount}</span> exercise
+            {exCount === 1 ? "" : "s"} and{" "}
+            <span className="font-medium">{setCount}</span> set
+            {setCount === 1 ? "" : "s"}.
           </p>
           {workout?.date && (
             <p className="mt-1 text-xs text-gray-500">Date: {workout.date}</p>
@@ -163,7 +205,6 @@ export default function LogTab({ db, setDb }) {
   const [celebrationWorkout, setCelebrationWorkout] = useState(null);
   const [celebrationCompleted, setCelebrationCompleted] = useState(false);
 
-  // start new session (original behavior)
   const startSession = () => {
     const program = db?.programs?.find((p) => p.id === db?.activeProgramId);
     if (!program) return;
@@ -180,8 +221,8 @@ export default function LogTab({ db, setDb }) {
     setSession(newSession);
   };
 
-  // save actions (now trigger celebration)
   const saveSession = (completed) => {
+    if (!session) return;
     const toSave = { ...session, completed };
     const newLog = [...(db.log || []), toSave];
     setDb({ ...db, log: newLog });
