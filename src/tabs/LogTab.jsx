@@ -38,205 +38,282 @@ const ratingBtnClasses = (active, color) =>
 
 /**
  * Build a working session for the UI from the active program/day + last session.
+ * Auto-fills reps from program, kg from last time on this day, and auto-selects last rating.
  */
-const buildSession = (program, programDay, lastSession) => {
-  const exercises = (programDay?.exercises || []).map((ex, i) => {
-    const prev = lastSession?.exercises?.[i];
-    return {
-      id: genId(),
-      name: ex.name,
-      sets: ex.sets.map((s, j) => ({
-        id: genId(),
-        weight: prev?.sets?.[j]?.weight || "",
-        reps: prev?.sets?.[j]?.reps || "",
-        rpe: prev?.sets?.[j]?.rpe || "",
-        notes: "",
-      })),
-    };
-  });
+function seedWorking(db, program, day, date) {
+  if (!program || !day) return { date, entries: [] };
+
+  const lastSession = (db.log || [])
+    .filter((s) => s.programId === program.id && s.dayId === day.id && s.date < date)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
 
   return {
-    id: genId(),
-    date: todayIso(),
-    exercises,
-    completed: false,
+    date,
+    programId: program.id,
+    dayId: day.id,
+    entries: (day.items || []).map((it) => {
+      const prevEntry = lastSession?.entries?.find((e) => e.exerciseId === it.exerciseId);
+      const sets = Array.from({ length: clampInt(it.sets ?? 1, 1, 100) }, (_, i) => ({
+        reps: String(clampInt(it.reps ?? 1, 1, 100)),
+        kg:
+          prevEntry?.sets?.[i]?.kg !== undefined && prevEntry?.sets?.[i]?.kg !== null
+            ? String(prevEntry.sets[i].kg)
+            : "",
+      }));
+      return {
+        id: genId(),
+        exerciseId: it.exerciseId,
+        exerciseName: it.name,
+        rating: prevEntry?.rating ?? null, // auto-select last time’s rating
+        sets,
+      };
+    }),
   };
-};
+}
 
 export default function LogTab({ db, setDb }) {
-  const [session, setSession] = useState(null);
-  const [programDay, setProgramDay] = useState(null);
+  const programs = db.programs || [];
+  const activeProgram =
+    programs.find((p) => p.id === db.activeProgramId) || programs[0] || null;
 
-  // track last completed session per exercise
-  const lastSessionByExercise = useMemo(() => {
-    const map = {};
-    (db?.log || []).forEach((s) => {
-      if (!s.completed) return;
-      (s.exercises || []).forEach((ex, i) => {
-        map[ex.name] = ex;
-      });
-    });
-    return map;
-  }, [db]);
+  const [date, setDate] = useState(todayIso());
+  const dayList = activeProgram?.days || [];
+  const [dayId, setDayId] = useState(dayList[0]?.id || "");
 
-  // start new session
-  const startSession = () => {
-    const program = db?.programs?.find((p) => p.id === db?.activeProgramId);
-    if (!program) return;
+  useEffect(() => {
+    if (dayList.length && !dayList.find((d) => d.id === dayId)) {
+      setDayId(dayList[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProgram?.id]);
 
-    const dayIndex = weeksBetween(program.startDate) % program.days.length;
-    const programDay = program.days[dayIndex];
-    setProgramDay(programDay);
+  const day = dayList.find((d) => d.id === dayId) || null;
 
-    const lastSession = (db?.log || []).find(
-      (s) => s.programDayId === programDay.id && s.completed
+  // Build working state from program/day + last session
+  const [working, setWorking] = useState(() => seedWorking(db, activeProgram, day, date));
+  useEffect(() => {
+    setWorking(seedWorking(db, activeProgram, day, date));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(day), activeProgram?.id, date, JSON.stringify(db.log)]);
+
+  // last session for “Last: …” per-set info
+  const lastSession = useMemo(() => {
+    if (!activeProgram || !day) return null;
+    return (db.log || [])
+      .filter((s) => s.programId === activeProgram.id && s.dayId === day.id && s.date < date)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+  }, [db.log, activeProgram?.id, day?.id, date]);
+
+  // --- editing helpers ---
+  const editSet = (entryId, setIdx, patch) =>
+    setWorking((w) => ({
+      ...w,
+      entries: w.entries.map((e) =>
+        e.id === entryId
+          ? {
+              ...e,
+              sets: e.sets.map((s, i) => (i === setIdx ? { ...s, ...patch } : s)),
+            }
+          : e
+      ),
+    }));
+
+  const setRating = (entryId, rating) =>
+    setWorking((w) => ({
+      ...w,
+      entries: w.entries.map((e) =>
+        e.id === entryId ? { ...e, rating: e.rating === rating ? null : rating } : e
+      ),
+    }));
+
+  const saveSession = () => {
+    if (!activeProgram || !day) return;
+
+    const normalized = {
+      id: genId(),
+      date,
+      programId: activeProgram.id,
+      dayId: day.id,
+      entries: working.entries.map((e) => ({
+        exerciseId: e.exerciseId,
+        exerciseName: e.exerciseName,
+        rating: e.rating ?? null,
+        sets: e.sets.map((s) => ({
+          reps: clampInt(String(s.reps || "0"), 0, 10000),
+          kg: clampFloat(String(s.kg || "0"), 0, 100000),
+        })),
+      })),
+    };
+
+    const existingIdx = (db.log || []).findIndex(
+      (s) => s.date === date && s.programId === activeProgram.id && s.dayId === day.id
     );
 
-    const newSession = buildSession(program, programDay, lastSession);
-    newSession.programDayId = programDay.id;
-    setSession(newSession);
+    const nextLog =
+      existingIdx >= 0
+        ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
+        : [...(db.log || []), normalized];
+
+    setDb({ ...db, log: nextLog });
   };
 
-  const saveSession = (completed) => {
-    const newLog = [...(db.log || []), { ...session, completed }];
-    setDb({ ...db, log: newLog });
-    setSession(null);
-  };
-
-  const cancelSession = () => {
-    setSession(null);
-  };
+  // ---- UI ----
+  if (!activeProgram) {
+    return (
+      <div className="text-sm text-zinc-300">
+        No active program. Create one in the Program tab and set it active.
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 space-y-4">
-      {!session && (
-        <div>
-          <button
-            onClick={startSession}
-            className="px-4 py-2 rounded bg-green-600 text-white"
-          >
-            Start New Workout
-          </button>
+    <div className="space-y-4">
+      {/* Header: program + weeks */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-lg font-semibold">{activeProgram.name}</div>
+        <div className="text-xs text-zinc-400">
+          Started {activeProgram.startDate || "—"} · Week{" "}
+          {weeksBetween(activeProgram.startDate) + 1}
         </div>
-      )}
+      </div>
 
-      {session && (
+      {/* Date + Day pickers */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <label className="text-sm text-zinc-300">Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value || todayIso())}
+            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+          />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <label className="text-sm text-zinc-300">Training Day</label>
+          <select
+            value={dayId}
+            onChange={(e) => setDayId(e.target.value)}
+            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+          >
+            {dayList.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Entries */}
+      {!day || (working.entries || []).length === 0 ? (
+        <div className="text-sm text-zinc-400">This day has no programmed exercises yet.</div>
+      ) : (
         <div className="space-y-4">
-          <h2 className="text-xl font-bold">
-            Workout — {programDay?.name || "Day"}
-          </h2>
-          {(session.exercises || []).map((ex, i) => (
-            <div key={ex.id} className="border rounded p-2 space-y-2">
-              <h3 className="font-semibold">{ex.name}</h3>
-              {(ex.sets || []).map((set, j) => (
-                <div key={set.id} className="flex space-x-2">
-                  <input
-                    type="number"
-                    value={set.weight}
-                    placeholder="Weight"
-                    onChange={(e) => {
-                      const val = clampFloat(e.target.value, 0, 999);
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].weight = val;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 w-20"
-                  />
-                  <input
-                    type="number"
-                    value={set.reps}
-                    placeholder="Reps"
-                    onChange={(e) => {
-                      const val = clampInt(e.target.value, 0, 50);
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].reps = val;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 w-16"
-                  />
-                  <input
-                    type="number"
-                    value={set.rpe}
-                    placeholder="RPE"
-                    onChange={(e) => {
-                      const val = clampFloat(e.target.value, 0, 10);
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].rpe = val;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 w-16"
-                  />
-                  <input
-                    type="text"
-                    value={set.notes}
-                    placeholder="Notes"
-                    onChange={(e) => {
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].notes = e.target.value;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 flex-1"
-                  />
+          {working.entries.map((entry) => {
+            const prevEntry = lastSession?.entries?.find(
+              (e) => e.exerciseId === entry.exerciseId
+            );
+
+            return (
+              <div key={entry.id} className="rounded border border-zinc-700">
+                <div className="p-3 flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <div className="font-medium">{entry.exerciseName}</div>
+                    <div className="text-xs text-zinc-400">
+                      Target:{" "}
+                      {(() => {
+                        // find programmed sets x reps from day
+                        const programmed = day.items.find((it) => it.exerciseId === entry.exerciseId);
+                        const sets = programmed?.sets ?? entry.sets?.length ?? 0;
+                        const reps = programmed?.reps ?? (entry.sets?.[0]?.reps ? Number(entry.sets[0].reps) : 0);
+                        return `${sets} × ${reps}`;
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* rating buttons */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      className={ratingBtnClasses(entry.rating === "easy", "green")}
+                      onClick={() => setRating(entry.id, "easy")}
+                      title="Felt easy — go up next time"
+                    >
+                      Easy
+                    </button>
+                    <button
+                      className={ratingBtnClasses(entry.rating === "moderate", "orange")}
+                      onClick={() => setRating(entry.id, "moderate")}
+                      title="Felt okay — hold next time"
+                    >
+                      Moderate
+                    </button>
+                    <button
+                      className={ratingBtnClasses(entry.rating === "hard", "red")}
+                      onClick={() => setRating(entry.id, "hard")}
+                      title="Felt hard — go down next time"
+                    >
+                      Hard
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          ))}
-          <div className="flex space-x-2">
-            <button
-              onClick={() => saveSession(true)}
-              className="px-4 py-2 rounded bg-blue-600 text-white"
-            >
-              Complete
-            </button>
-            <button
-              onClick={() => saveSession(false)}
-              className="px-4 py-2 rounded bg-yellow-500 text-white"
-            >
-              Save Incomplete
-            </button>
-            <button
-              onClick={cancelSession}
-              className="px-4 py-2 rounded bg-red-600 text-white"
-            >
-              Cancel
+
+                <div className="border-t border-zinc-700 p-3 space-y-2">
+                  {entry.sets.map((s, idx) => {
+                    const prevSet = prevEntry?.sets?.[idx];
+                    return (
+                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center">
+                        <div className="text-sm text-zinc-400">Set {idx + 1}</div>
+
+                        {/* Reps input (clearly labeled) */}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Reps</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={String(s.reps)}
+                            onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
+                            placeholder="Reps"
+                            className="p-2 rounded bg-zinc-900 text-zinc-100"
+                            aria-label="Reps"
+                          />
+                        </div>
+
+                        {/* Weight input (clearly labeled) */}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Weight (kg)</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.5"
+                            value={String(s.kg)}
+                            onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
+                            placeholder="Weight (kg)"
+                            className="p-2 rounded bg-zinc-900 text-zinc-100"
+                            aria-label="Weight in kilograms"
+                          />
+                        </div>
+
+                        {/* Last time */}
+                        <div className="text-xs text-zinc-400">
+                          {prevSet ? `Last: ${prevSet.reps} reps @ ${prevSet.kg} kg` : "—"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="flex justify-end">
+            <button onClick={saveSession} className="px-4 py-2 rounded bg-blue-600 text-white">
+              Save
             </button>
           </div>
         </div>
       )}
-
-      <div>
-        <h2 className="text-xl font-bold mb-2">Workout Log</h2>
-        {(db?.log || []).length === 0 && <p>No workouts yet.</p>}
-        <div className="space-y-2">
-          {(db?.log || [])
-            .slice()
-            .reverse()
-            .map((s) => (
-              <div
-                key={s.id}
-                className="border rounded p-2 space-y-1 bg-white shadow-sm"
-              >
-                <div className="flex justify-between">
-                  <span>{s.date}</span>
-                  <span>{s.completed ? "✅" : "⏸️"}</span>
-                </div>
-                {(s.exercises || []).map((ex) => (
-                  <div key={ex.id} className="ml-4">
-                    <strong>{ex.name}</strong>
-                    <ul className="ml-4 list-disc">
-                      {(ex.sets || []).map((set) => (
-                        <li key={set.id}>
-                          {set.weight}kg × {set.reps} reps (RPE {set.rpe}){" "}
-                          {set.notes}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            ))}
-        </div>
-      </div>
     </div>
   );
 }
