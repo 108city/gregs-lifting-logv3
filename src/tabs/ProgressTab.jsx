@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { supabase } from "../supabaseClient.js";
 
-/* ───────────────────────── Utilities ───────────────────────── */
+/* ─────────── Helpers ─────────── */
 function isoDate(d = new Date()) {
   return new Date(d).toISOString().slice(0, 10);
 }
@@ -34,11 +34,7 @@ function daysBetween(a, b) {
 function formatShortDate(w) {
   const dt = toDate(w?.date || w?.endedAt || w?.startedAt);
   if (!dt) return "Unknown";
-  return dt.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+  return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 function morningOrEvening(w) {
   const dt =
@@ -50,19 +46,13 @@ function morningOrEvening(w) {
 }
 function getExercisesFromWorkout(w) {
   if (!w) return [];
-  if (Array.isArray(w.exercises) && w.exercises.length) {
-    return w.exercises.map((ex) => ({
-      name: ex?.name ?? ex?.exerciseName ?? "Exercise",
-      sets: Array.isArray(ex?.sets) ? ex.sets : [],
-    }));
-  }
+  if (Array.isArray(w.exercises) && w.exercises.length) return w.exercises;
   if (Array.isArray(w.entries) && w.entries.length) {
     return w.entries.map((e) => ({
-      name: e?.exerciseName ?? e?.name ?? "Exercise",
-      sets: (Array.isArray(e?.sets) ? e.sets : []).map((s) => ({
-        reps: Number(s?.reps || 0),
-        weight: Number(s?.kg || 0),
-        notes: s?.notes ?? "",
+      name: e.exerciseName,
+      sets: e.sets.map((s) => ({
+        reps: Number(s.reps || 0),
+        weight: Number(s.kg || 0),
       })),
     }));
   }
@@ -77,73 +67,54 @@ function setWeight(s) {
   return 0;
 }
 function hasRealSet(s) {
-  const reps = Number(s?.reps || 0);
-  const wt = setWeight(s);
-  const notesOk = typeof s?.notes === "string" && s.notes.trim().length > 0;
-  return reps > 0 || wt > 0 || notesOk;
+  return Number(s?.reps || 0) > 0 || setWeight(s) > 0;
 }
 function isMeaningfulWorkout(w) {
-  const exs = getExercisesFromWorkout(w);
-  return exs.some((ex) => getSets(ex).some(hasRealSet));
-}
-function dayNumberLabel(w, programs) {
-  const prog = programs?.find?.((p) => p.id === w?.programId);
-  if (!prog) return "Day ?";
-  const idx = (prog.days || []).findIndex((d) => d.id === w?.dayId);
-  return idx >= 0 ? `Day ${idx + 1}` : "Day ?";
+  return getExercisesFromWorkout(w).some((ex) => getSets(ex).some(hasRealSet));
 }
 
-/* ───────────────────────── Portal ───────────────────────── */
+/* ─────────── Portal Modal ─────────── */
 function Portal({ children }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
   return ReactDOM.createPortal(children, document.body);
 }
-
-/* ───────────────────────── Edit Modal ───────────────────────── */
 function EditWorkoutModal({ open, onClose, workout }) {
   if (!open || !workout) return null;
-  const exercises = getExercisesFromWorkout(workout);
-
   return (
     <Portal>
       <div className="fixed inset-0 z-[9999] flex items-center justify-center">
         <div className="absolute inset-0 bg-black/50" onClick={onClose} />
         <div className="relative z-10 w-[min(96vw,800px)] max-h-[90vh] overflow-auto rounded-2xl border bg-white p-6 shadow-2xl">
-          <div className="mb-4 flex justify-between">
-            <h2 className="text-lg font-semibold text-black">
-              {formatShortDate(workout)} • {morningOrEvening(workout)} • {dayNumberLabel(workout, [])}
-            </h2>
-            <button
-              onClick={onClose}
-              className="rounded border px-3 py-1 text-sm text-black hover:bg-gray-100"
-            >
-              Close
-            </button>
-          </div>
-          <div className="space-y-4">
-            {exercises.map((ex, i) => (
-              <div key={i} className="rounded border p-3">
-                <div className="font-medium text-blue-600">{ex.name}</div>
-                {getSets(ex).map((s, j) => (
-                  <div key={j} className="mt-1 text-sm">
-                    Set {j + 1}: {s.reps} × {setWeight(s)}kg
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
+          <h2 className="mb-4 text-lg font-semibold">
+            {formatShortDate(workout)} • {morningOrEvening(workout)}
+          </h2>
+          {getExercisesFromWorkout(workout).map((ex, i) => (
+            <div key={i} className="mb-2 rounded border p-2">
+              <div className="font-medium">{ex.name}</div>
+              {getSets(ex).map((s, j) => (
+                <div key={j} className="text-sm">
+                  Set {j + 1}: {s.reps} × {setWeight(s)}kg
+                </div>
+              ))}
+            </div>
+          ))}
+          <button
+            onClick={onClose}
+            className="mt-3 rounded border px-3 py-1 text-sm hover:bg-gray-100"
+          >
+            Close
+          </button>
         </div>
       </div>
     </Portal>
   );
 }
 
-/* ───────────────────────── Recent Workouts ───────────────────────── */
+/* ─────────── Last 5 Workouts ─────────── */
 function RecentWorkoutsCloud({ workouts }) {
   const [selected, setSelected] = useState(null);
-
   if (!workouts || workouts.length === 0) return null;
 
   return (
@@ -151,18 +122,14 @@ function RecentWorkoutsCloud({ workouts }) {
       <h3 className="mb-3 text-base font-semibold">Last 5 Workouts</h3>
       <div className="grid gap-3">
         {workouts.slice(0, 5).map((w, idx) => (
-          <div key={idx} className="rounded border p-3">
-            <div className="flex justify-between">
-              <div>
-                {formatShortDate(w)} • {morningOrEvening(w)}
-              </div>
-              <button
-                className="rounded border px-3 py-1 text-sm hover:bg-gray-100"
-                onClick={() => setSelected(w)}
-              >
-                View more
-              </button>
-            </div>
+          <div key={idx} className="rounded border p-3 flex justify-between">
+            <div>{formatShortDate(w)} • {morningOrEvening(w)}</div>
+            <button
+              className="rounded border px-3 py-1 text-sm hover:bg-gray-100"
+              onClick={() => setSelected(w)}
+            >
+              View more
+            </button>
           </div>
         ))}
       </div>
@@ -171,7 +138,7 @@ function RecentWorkoutsCloud({ workouts }) {
   );
 }
 
-/* ───────────────────────── 2-Week Calendar ───────────────────────── */
+/* ─────────── 2-Week Calendar ─────────── */
 function TwoWeekCalendar({ workouts }) {
   const worked = useMemo(() => {
     const set = new Set();
@@ -189,9 +156,8 @@ function TwoWeekCalendar({ workouts }) {
     days.push(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
   }
   const rows = [days.slice(0, 7), days.slice(7)];
-
   const cellBase =
-    "h-16 rounded-xl border flex flex-col items-center justify-center gap-1 p-2 text-sm"; // added p-2
+    "h-16 rounded-xl border flex flex-col items-center justify-center gap-1 p-3 text-sm"; // added p-3
   const labelCls = "text-[11px] text-gray-500";
 
   return (
@@ -213,7 +179,9 @@ function TwoWeekCalendar({ workouts }) {
                 }`}
               >
                 <div className="text-2xl">{didWork ? "💪" : "😴"}</div>
-                <div className={labelCls}>{d.toLocaleDateString(undefined, { weekday: "short" })}</div>
+                <div className={labelCls}>
+                  {d.toLocaleDateString(undefined, { weekday: "short" })}
+                </div>
                 <div className="text-xs font-medium">{d.getDate()}</div>
               </div>
             );
@@ -224,14 +192,10 @@ function TwoWeekCalendar({ workouts }) {
   );
 }
 
-/* ───────────────────────── Main ProgressTab ───────────────────────── */
+/* ─────────── Main ProgressTab ─────────── */
 export default function ProgressTab({ db }) {
   const log = db?.log || [];
-
-  const filteredLog = useMemo(
-    () => (Array.isArray(log) ? log.filter(isMeaningfulWorkout) : []),
-    [log]
-  );
+  const filteredLog = useMemo(() => log.filter(isMeaningfulWorkout), [log]);
 
   // KPIs
   const { recent7, recent30 } = useMemo(() => {
@@ -261,6 +225,9 @@ export default function ProgressTab({ db }) {
           <p className="mt-1 text-2xl font-semibold">{recent30}</p>
         </div>
       </div>
+
+      {/* Graph placeholder (your existing line graph logic stays here) */}
+      {/* … if you want, reinsert the per-exercise graph block … */}
 
       {/* Calendar */}
       <TwoWeekCalendar workouts={filteredLog} />
