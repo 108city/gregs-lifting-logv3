@@ -1,6 +1,6 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
-import { supabase } from "../supabaseClient.js"; // <-- make sure this path exists in your project
+import { supabase } from "../supabaseClient.js";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Utilities (unchanged)
@@ -40,8 +40,7 @@ const ratingBtnClasses = (active, color) =>
       : "bg-zinc-800 text-zinc-200"
   }`;
 
-/* Build a working session for the UI from the active program/day + last session.
-   Auto-fills reps from program, kg from last time on this day, and auto-selects last rating. */
+/* Build a working session for the UI from the active program/day + last session. */
 function seedWorking(db, program, day, date) {
   if (!program || !day) return { date, entries: [] };
 
@@ -66,7 +65,7 @@ function seedWorking(db, program, day, date) {
         id: genId(),
         exerciseId: it.exerciseId,
         exerciseName: it.name,
-        rating: prevEntry?.rating ?? null, // auto-select last time’s rating
+        rating: prevEntry?.rating ?? null,
         sets,
       };
     }),
@@ -101,8 +100,8 @@ function EmojiBurst({ runKey, duration = 1100, count = 34 }) {
       span.style.pointerEvents = "none";
       el.appendChild(span);
 
-      const vx = (Math.random() - 0.5) * 60; // px/s sideways
-      const vy = 120 + Math.random() * 160;   // px/s up
+      const vx = (Math.random() - 0.5) * 60;
+      const vy = 120 + Math.random() * 160;
       items.push({ node: span, vx, vy, x: 0, y: 0 });
     }
 
@@ -110,7 +109,7 @@ function EmojiBurst({ runKey, duration = 1100, count = 34 }) {
     function tick(t) {
       const dt = Math.min(16, t - (tick.prev || t));
       tick.prev = t;
-      const life = 1 - Math.max(0, end - t) / duration; // 0..1
+      const life = 1 - Math.max(0, end - t) / duration;
 
       items.forEach((p) => {
         p.x += (p.vx * dt) / 1000;
@@ -142,11 +141,8 @@ function CelebrationModal({ open, onClose, workoutDate, entriesCount, setsCount,
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* backdrop */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      {/* emoji burst */}
       <EmojiBurst runKey={burstKey} />
-      {/* card */}
       <div className="relative z-10 w-[min(92vw,520px)] rounded-2xl border border-green-200 bg-white p-5 shadow-2xl">
         <div className="flex items-center gap-3">
           <div className="grid h-12 w-12 place-items-center rounded-full bg-green-100">
@@ -206,14 +202,12 @@ export default function LogTab({ db, setDb }) {
 
   const day = dayList.find((d) => d.id === dayId) || null;
 
-  // Build working state from program/day + last session
   const [working, setWorking] = useState(() => seedWorking(db, activeProgram, day, date));
   useEffect(() => {
     setWorking(seedWorking(db, activeProgram, day, date));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(day), activeProgram?.id, date, JSON.stringify(db.log)]);
 
-  // last session for “Last: …” per-set info
   const lastSession = useMemo(() => {
     if (!activeProgram || !day) return null;
     return (db.log || [])
@@ -221,21 +215,16 @@ export default function LogTab({ db, setDb }) {
       .sort((a, b) => b.date.localeCompare(a.date))[0];
   }, [db.log, activeProgram?.id, day?.id, date]);
 
-  // celebration + sync state
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationMeta, setCelebrationMeta] = useState({ date: "", entries: 0, sets: 0 });
-  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | fail
+  const [syncStatus, setSyncStatus] = useState("idle");
 
-  // --- editing helpers ---
   const editSet = (entryId, setIdx, patch) =>
     setWorking((w) => ({
       ...w,
       entries: w.entries.map((e) =>
         e.id === entryId
-          ? {
-              ...e,
-              sets: e.sets.map((s, i) => (i === setIdx ? { ...s, ...patch } : s)),
-            }
+          ? { ...e, sets: e.sets.map((s, i) => (i === setIdx ? { ...s, ...patch } : s)) }
           : e
       ),
     }));
@@ -248,7 +237,6 @@ export default function LogTab({ db, setDb }) {
       ),
     }));
 
-  /* STEP 1: Build the normalized session object to save */
   function buildNormalized() {
     return {
       id: genId(),
@@ -267,7 +255,6 @@ export default function LogTab({ db, setDb }) {
     };
   }
 
-  /* STEP 2: Merge into local db.log (so UI updates instantly) */
   function mergeIntoLocalLog(sessionObj) {
     const existingIdx = (db.log || []).findIndex(
       (s) => s.date === sessionObj.date && s.programId === sessionObj.programId && s.dayId === sessionObj.dayId
@@ -279,44 +266,68 @@ export default function LogTab({ db, setDb }) {
     return { ...db, log: nextLog };
   }
 
-  /* STEP 3: Persist ONLY { log: [...] } to Supabase -> lifting_logs[id='main'].data */
-  async function persistToCloudLogArray(nextDb) {
+  // Save to the device row and main row so Progress (which prefers device via syncService)
+  // and any fallback readers both see the update.
+  async function persistToCloudAll(nextDb) {
+    const logOnly = { log: nextDb.log };
+    let ok = true;
+
+    // 1) Try project syncService first (if your app uses it)
     try {
-      console.log("[LogTab] Upserting to Supabase → lifting_logs(main).data.log (items):", nextDb.log?.length ?? 0);
+      const m = await import("../syncService.js");
+      if (m && typeof m.saveToCloud === "function") {
+        console.log("[LogTab] syncService.saveToCloud → start");
+        await m.saveToCloud(nextDb);
+        console.log("[LogTab] syncService.saveToCloud → ok");
+      }
+    } catch (e) {
+      console.warn("[LogTab] syncService.saveToCloud not available or failed:", e?.message || e);
+    }
+
+    // 2) Upsert 'main'
+    try {
+      console.log("[LogTab] Upsert → lifting_logs(id='main') with data.log items:", nextDb.log?.length ?? 0);
       const { error } = await supabase
         .from("lifting_logs")
-        .upsert([{ id: "main", data: { log: nextDb.log } }], { onConflict: "id" });
-      if (error) {
-        console.error("[LogTab] Supabase upsert error:", error.message);
-        return false;
-      }
-      console.log("[LogTab] Cloud save OK");
-      return true;
+        .upsert([{ id: "main", data: logOnly }], { onConflict: "id" });
+      if (error) throw error;
+      console.log("[LogTab] Upsert main → ok");
     } catch (e) {
-      console.error("[LogTab] Cloud save failed:", e?.message || e);
-      return false;
+      ok = false;
+      console.error("[LogTab] Upsert main failed:", e?.message || e);
     }
+
+    // 3) Upsert 'gregs-device' (since your DB shows this row and Progress may read it)
+    try {
+      console.log("[LogTab] Upsert → lifting_logs(id='gregs-device') with data.log items:", nextDb.log?.length ?? 0);
+      const { error } = await supabase
+        .from("lifting_logs")
+        .upsert([{ id: "gregs-device", data: logOnly }], { onConflict: "id" });
+      if (error) throw error;
+      console.log("[LogTab] Upsert gregs-device → ok");
+    } catch (e) {
+      // Not fatal if this row isn't used, but log it for clarity
+      console.warn("[LogTab] Upsert gregs-device failed (ok if row unused):", e?.message || e);
+    }
+
+    return ok;
   }
 
-  /* STEP 4: Save handler */
   const saveSession = async () => {
     if (!activeProgram || !day) return;
 
     const normalized = buildNormalized();
     const nextDb = mergeIntoLocalLog(normalized);
 
-    // Update local immediately
     setDb(nextDb);
 
-    // Celebration popup
     const entriesCount = normalized.entries.length;
     const setsCount = normalized.entries.reduce((acc, e) => acc + (e.sets?.length || 0), 0);
     setCelebrationMeta({ date: normalized.date, entries: entriesCount, sets: setsCount });
     setSyncStatus("syncing");
     setShowCelebration(true);
 
-    // Persist to cloud (ONLY { log: [...] })
-    const ok = await persistToCloudLogArray(nextDb);
+    const ok = await persistToCloudAll(nextDb);
     setSyncStatus(ok ? "ok" : "fail");
   };
 
