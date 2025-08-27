@@ -283,19 +283,19 @@ function TwoWeekCalendar({ workouts }) {
   }
   const rows = [days.slice(0, 7), days.slice(7)];
 
-  // Comfy internal padding and spacing so emoji/text never touch borders
+  // Improved cell styling with better spacing for emojis
   const cellBase =
-    "h-20 rounded-xl border flex flex-col items-center justify-center px-4 py-3 space-y-1 text-sm";
-  const labelCls = "text-[11px] text-gray-500";
+    "h-24 rounded-xl border flex flex-col items-center justify-center p-2 text-sm transition-colors";
+  const labelCls = "text-[10px] text-gray-500 font-medium";
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <h3 className="text-base font-semibold">Last 2 Weeks</h3>
         <p className="text-xs text-gray-500">💪 worked • 😴 rest</p>
       </div>
 
-      <div className="grid grid-cols-7 gap-2">
+      <div className="grid grid-cols-7 gap-3">
         {rows[0].map((d, i) => {
           const key = localIso(d);
           const didWork = worked.has(key);
@@ -307,17 +307,17 @@ function TwoWeekCalendar({ workouts }) {
               }`}
               title={key}
             >
-              <div className="text-3xl">{didWork ? "💪" : "😴"}</div>
-              <div className={labelCls}>
+              <div className="text-2xl mb-1 leading-none">{didWork ? "💪" : "😴"}</div>
+              <div className={`${labelCls} mb-0.5`}>
                 {d.toLocaleDateString(undefined, { weekday: "short" })}
               </div>
-              <div className="text-xs font-medium">{d.getDate()}</div>
+              <div className="text-xs font-semibold text-gray-700">{d.getDate()}</div>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-2 grid grid-cols-7 gap-2">
+      <div className="mt-3 grid grid-cols-7 gap-3">
         {rows[1].map((d, i) => {
           const key = localIso(d);
           const didWork = worked.has(key);
@@ -329,11 +329,11 @@ function TwoWeekCalendar({ workouts }) {
               }`}
               title={key}
             >
-              <div className="text-3xl">{didWork ? "💪" : "😴"}</div>
-              <div className={labelCls}>
+              <div className="text-2xl mb-1 leading-none">{didWork ? "💪" : "😴"}</div>
+              <div className={`${labelCls} mb-0.5`}>
                 {d.toLocaleDateString(undefined, { weekday: "short" })}
               </div>
-              <div className="text-xs font-medium">{d.getDate()}</div>
+              <div className="text-xs font-semibold text-gray-700">{d.getDate()}</div>
             </div>
           );
         })}
