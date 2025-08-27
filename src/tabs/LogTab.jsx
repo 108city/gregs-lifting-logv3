@@ -100,7 +100,7 @@ function EmojiBurst({ runKey, duration = 1100, count = 34 }) {
       el.appendChild(span);
 
       const vx = (Math.random() - 0.5) * 60; // px/s sideways
-      const vy = 120 + Math.random() * 160;   // px/s up
+      const vy = 120 + Math.random() * 160; // px/s up
       items.push({ node: span, vx, vy, x: 0, y: 0 });
     }
 
@@ -130,7 +130,7 @@ function EmojiBurst({ runKey, duration = 1100, count = 34 }) {
   return <div ref={containerRef} className="pointer-events-none absolute inset-0 overflow-hidden" />;
 }
 
-function CelebrationModal({ open, onClose, workoutDate, entriesCount, setsCount }) {
+function CelebrationModal({ open, onClose, workoutDate, entriesCount, setsCount, syncStatus }) {
   const [burstKey, setBurstKey] = useState(0);
   useEffect(() => {
     if (open) setBurstKey((k) => k + 1);
@@ -162,6 +162,12 @@ function CelebrationModal({ open, onClose, workoutDate, entriesCount, setsCount 
             <span className="font-medium">{setsCount}</span> set{setsCount === 1 ? "" : "s"}.
           </p>
           {workoutDate && <p className="mt-1 text-xs text-gray-500">Date: {workoutDate}</p>}
+          <p className="mt-2 text-xs">
+            {syncStatus === "idle" && "Saved locally."}
+            {syncStatus === "syncing" && "Saved locally • Syncing to cloud…"}
+            {syncStatus === "ok" && "✅ Synced to cloud."}
+            {syncStatus === "fail" && "⚠️ Saved locally. Cloud sync failed."}
+          </p>
         </div>
 
         <div className="mt-4 flex items-center justify-end gap-2">
@@ -215,6 +221,7 @@ export default function LogTab({ db, setDb }) {
   // celebration state
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationMeta, setCelebrationMeta] = useState({ date: "", entries: 0, sets: 0 });
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | fail
 
   // --- editing helpers ---
   const editSet = (entryId, setIdx, patch) =>
@@ -238,7 +245,34 @@ export default function LogTab({ db, setDb }) {
       ),
     }));
 
-  const saveSession = () => {
+  // Persist to cloud (try your syncService.saveToCloud; fallback to Supabase)
+  async function persistToCloud(nextDb) {
+    // Try project's syncService first
+    try {
+      const m = await import("../syncService.js");
+      if (m && typeof m.saveToCloud === "function") {
+        await m.saveToCloud(nextDb);
+        return true;
+      }
+    } catch {
+      // ignore, fallback below
+    }
+    // Fallback: upsert to Supabase table `lifting_logs`, row id='main'
+    try {
+      const { supabase } = await import("../supabaseClient.js");
+      // If your table or schema differs, tweak here:
+      const { error } = await supabase
+        .from("lifting_logs")
+        .upsert([{ id: "main", data: nextDb }], { onConflict: "id" });
+      if (error) throw error;
+      return true;
+    } catch (e) {
+      console.error("[LogTab] Cloud save failed:", e?.message || e);
+      return false;
+    }
+  }
+
+  const saveSession = async () => {
     if (!activeProgram || !day) return;
 
     const normalized = {
@@ -266,13 +300,21 @@ export default function LogTab({ db, setDb }) {
         ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
         : [...(db.log || []), normalized];
 
-    setDb({ ...db, log: nextLog });
+    const nextDb = { ...db, log: nextLog };
 
-    // ---- show celebration (emoji popup) ----
+    // 1) Save locally (immediate UX)
+    setDb(nextDb);
+
+    // 2) Trigger celebration immediately
     const entriesCount = normalized.entries.length;
     const setsCount = normalized.entries.reduce((acc, e) => acc + (e.sets?.length || 0), 0);
     setCelebrationMeta({ date: normalized.date, entries: entriesCount, sets: setsCount });
+    setSyncStatus("syncing");
     setShowCelebration(true);
+
+    // 3) Sync to cloud in background
+    const ok = await persistToCloud(nextDb);
+    setSyncStatus(ok ? "ok" : "fail");
   };
 
   // ---- UI ----
@@ -439,6 +481,7 @@ export default function LogTab({ db, setDb }) {
         workoutDate={celebrationMeta.date}
         entriesCount={celebrationMeta.entries}
         setsCount={celebrationMeta.sets}
+        syncStatus={syncStatus}
       />
     </div>
   );
