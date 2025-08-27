@@ -1,10 +1,8 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState, useRef } from "react";
 
-// ----- helpers (same spirit as your original) -----
 const todayIso = () => new Date().toISOString().slice(0, 10);
-const genId = () =>
-  Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
 const clampInt = (v, min, max) => {
   const n = parseInt(v, 10);
   if (Number.isNaN(n)) return min;
@@ -27,60 +25,68 @@ const weeksBetween = (startIso, endIso = todayIso()) => {
   }
 };
 
-// Build a working session from active program/day + last session baseline
-const buildSession = (program, programDay, lastSession) => {
-  const exercises = (programDay?.exercises || []).map((ex, i) => {
-    const prev = lastSession?.exercises?.[i];
-    return {
-      id: genId(),
-      name: ex.name,
-      sets: ex.sets.map((s, j) => ({
-        id: genId(),
-        weight: prev?.sets?.[j]?.weight || "",
-        reps: prev?.sets?.[j]?.reps || "",
-        rpe: prev?.sets?.[j]?.rpe || "",
-        notes: "",
-      })),
-    };
-  });
+const ratingBtnClasses = (active, color) =>
+  `px-2 py-1 rounded text-sm ${
+    active
+      ? color === "green"
+        ? "bg-green-600 text-white"
+        : color === "orange"
+        ? "bg-orange-500 text-black"
+        : "bg-red-600 text-white"
+      : "bg-zinc-800 text-zinc-200"
+  }`;
+
+/**
+ * Build a working session for the UI from the active program/day + last session.
+ * Auto-fills reps from program, kg from last time on this day, and auto-selects last rating.
+ */
+function seedWorking(db, program, day, date) {
+  if (!program || !day) return { date, entries: [] };
+
+  const lastSession = (db.log || [])
+    .filter((s) => s.programId === program.id && s.dayId === day.id && s.date < date)
+    .sort((a, b) => b.date.localeCompare(a.date))[0];
 
   return {
-    id: genId(),
-    date: todayIso(),
-    exercises,
-    completed: false,
+    date,
+    programId: program.id,
+    dayId: day.id,
+    entries: (day.items || []).map((it) => {
+      const prevEntry = lastSession?.entries?.find((e) => e.exerciseId === it.exerciseId);
+      const sets = Array.from({ length: clampInt(it.sets ?? 1, 1, 100) }, (_, i) => ({
+        reps: String(clampInt(it.reps ?? 1, 1, 100)),
+        kg:
+          prevEntry?.sets?.[i]?.kg !== undefined && prevEntry?.sets?.[i]?.kg !== null
+            ? String(prevEntry.sets[i].kg)
+            : "",
+      }));
+      return {
+        id: genId(),
+        exerciseId: it.exerciseId,
+        exerciseName: it.name,
+        rating: prevEntry?.rating ?? null, // auto-select last time’s rating
+        sets,
+      };
+    }),
   };
-};
-
-const countSummary = (workout) => {
-  const exCount = (workout?.exercises || []).length;
-  const setCount = (workout?.exercises || []).reduce(
-    (acc, e) => acc + (e.sets?.length || 0),
-    0
-  );
-  return { exCount, setCount };
-};
+}
 
 /* ===============================
-   EmojiBurst (no dependencies)
-   Renders N absolutely-positioned emoji that float up and fade out.
+   Emoji celebration (no deps)
    =============================== */
-function EmojiBurst({ runKey, duration = 1000, count = 28 }) {
+function EmojiBurst({ runKey, duration = 1100, count = 34 }) {
   const containerRef = useRef(null);
   const emojis = ["🎉", "💪", "🔥", "⭐", "🏋️", "👏", "⚡"];
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
-    // Clear any previous children
     el.innerHTML = "";
 
     const items = [];
     const now = performance.now();
     const end = now + duration;
 
-    // Create particles
     for (let i = 0; i < count; i++) {
       const span = document.createElement("span");
       span.textContent = emojis[i % emojis.length];
@@ -89,13 +95,12 @@ function EmojiBurst({ runKey, duration = 1000, count = 28 }) {
       span.style.bottom = "0px";
       span.style.fontSize = 16 + Math.random() * 20 + "px";
       span.style.opacity = "1";
-      span.style.transform = `translate(-50%, 0)`;
+      span.style.transform = "translate(-50%, 0)";
       span.style.pointerEvents = "none";
       el.appendChild(span);
 
-      // random velocity upward with slight x drift
       const vx = (Math.random() - 0.5) * 60; // px/s sideways
-      const vy = 120 + Math.random() * 160; // px/s up
+      const vy = 120 + Math.random() * 160;   // px/s up
       items.push({ node: span, vx, vy, x: 0, y: 0 });
     }
 
@@ -103,8 +108,7 @@ function EmojiBurst({ runKey, duration = 1000, count = 28 }) {
     function tick(t) {
       const dt = Math.min(16, t - (tick.prev || t));
       tick.prev = t;
-      const remaining = Math.max(0, end - t);
-      const life = 1 - remaining / duration; // 0..1
+      const life = 1 - Math.max(0, end - t) / duration; // 0..1
 
       items.forEach((p) => {
         p.x += (p.vx * dt) / 1000;
@@ -116,30 +120,18 @@ function EmojiBurst({ runKey, duration = 1000, count = 28 }) {
       if (t < end) {
         raf = requestAnimationFrame(tick);
       } else {
-        // cleanup leftovers
         setTimeout(() => (el.innerHTML = ""), 50);
       }
     }
     raf = requestAnimationFrame(tick);
-
     return () => cancelAnimationFrame(raf);
-  }, [runKey, duration, count]); // re-run burst when runKey changes
+  }, [runKey, duration, count]);
 
-  return (
-    <div
-      ref={containerRef}
-      className="pointer-events-none absolute inset-0 overflow-hidden"
-    />
-  );
+  return <div ref={containerRef} className="pointer-events-none absolute inset-0 overflow-hidden" />;
 }
 
-/* ===============================
-   Celebration Modal (uses EmojiBurst)
-   =============================== */
-function CelebrationModal({ open, onClose, workout, completed }) {
-  const { exCount, setCount } = countSummary(workout);
+function CelebrationModal({ open, onClose, workoutDate, entriesCount, setsCount }) {
   const [burstKey, setBurstKey] = useState(0);
-
   useEffect(() => {
     if (open) setBurstKey((k) => k + 1);
   }, [open]);
@@ -149,13 +141,9 @@ function CelebrationModal({ open, onClose, workout, completed }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      {/* emoji burst layer */}
-      <EmojiBurst runKey={burstKey} duration={1100} count={34} />
-
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      {/* emoji burst */}
+      <EmojiBurst runKey={burstKey} />
       {/* card */}
       <div className="relative z-10 w-[min(92vw,520px)] rounded-2xl border border-green-200 bg-white p-5 shadow-2xl">
         <div className="flex items-center gap-3">
@@ -163,23 +151,17 @@ function CelebrationModal({ open, onClose, workout, completed }) {
             <span className="text-2xl">🎉</span>
           </div>
           <div>
-            <p className="text-sm text-gray-500">
-              {completed ? "Workout completed" : "Workout saved"}
-            </p>
+            <p className="text-sm text-gray-500">Workout saved</p>
             <h3 className="text-lg font-semibold">Nice work!</h3>
           </div>
         </div>
 
         <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm text-gray-700">
           <p>
-            Logged <span className="font-medium">{exCount}</span> exercise
-            {exCount === 1 ? "" : "s"} and{" "}
-            <span className="font-medium">{setCount}</span> set
-            {setCount === 1 ? "" : "s"}.
+            Logged <span className="font-medium">{entriesCount}</span> exercise{entriesCount === 1 ? "" : "s"} and{" "}
+            <span className="font-medium">{setsCount}</span> set{setsCount === 1 ? "" : "s"}.
           </p>
-          {workout?.date && (
-            <p className="mt-1 text-xs text-gray-500">Date: {workout.date}</p>
-          )}
+          {workoutDate && <p className="mt-1 text-xs text-gray-500">Date: {workoutDate}</p>}
         </div>
 
         <div className="mt-4 flex items-center justify-end gap-2">
@@ -195,186 +177,268 @@ function CelebrationModal({ open, onClose, workout, completed }) {
   );
 }
 
-// ----- Main LogTab -----
+/* =============================== */
+
 export default function LogTab({ db, setDb }) {
-  const [session, setSession] = useState(null);
-  const [programDay, setProgramDay] = useState(null);
+  const programs = db.programs || [];
+  const activeProgram =
+    programs.find((p) => p.id === db.activeProgramId) || programs[0] || null;
+
+  const [date, setDate] = useState(todayIso());
+  const dayList = activeProgram?.days || [];
+  const [dayId, setDayId] = useState(dayList[0]?.id || "");
+
+  useEffect(() => {
+    if (dayList.length && !dayList.find((d) => d.id === dayId)) {
+      setDayId(dayList[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProgram?.id]);
+
+  const day = dayList.find((d) => d.id === dayId) || null;
+
+  // Build working state from program/day + last session
+  const [working, setWorking] = useState(() => seedWorking(db, activeProgram, day, date));
+  useEffect(() => {
+    setWorking(seedWorking(db, activeProgram, day, date));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(day), activeProgram?.id, date, JSON.stringify(db.log)]);
+
+  // last session for “Last: …” per-set info
+  const lastSession = useMemo(() => {
+    if (!activeProgram || !day) return null;
+    return (db.log || [])
+      .filter((s) => s.programId === activeProgram.id && s.dayId === day.id && s.date < date)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+  }, [db.log, activeProgram?.id, day?.id, date]);
 
   // celebration state
   const [showCelebration, setShowCelebration] = useState(false);
-  const [celebrationWorkout, setCelebrationWorkout] = useState(null);
-  const [celebrationCompleted, setCelebrationCompleted] = useState(false);
+  const [celebrationMeta, setCelebrationMeta] = useState({ date: "", entries: 0, sets: 0 });
 
-  const startSession = () => {
-    const program = db?.programs?.find((p) => p.id === db?.activeProgramId);
-    if (!program) return;
-    const dayIndex = weeksBetween(program.startDate) % program.days.length;
-    const _programDay = program.days[dayIndex];
-    setProgramDay(_programDay);
+  // --- editing helpers ---
+  const editSet = (entryId, setIdx, patch) =>
+    setWorking((w) => ({
+      ...w,
+      entries: w.entries.map((e) =>
+        e.id === entryId
+          ? {
+              ...e,
+              sets: e.sets.map((s, i) => (i === setIdx ? { ...s, ...patch } : s)),
+            }
+          : e
+      ),
+    }));
 
-    const lastSession = (db?.log || []).find(
-      (s) => s.programDayId === _programDay.id && s.completed
+  const setRating = (entryId, rating) =>
+    setWorking((w) => ({
+      ...w,
+      entries: w.entries.map((e) =>
+        e.id === entryId ? { ...e, rating: e.rating === rating ? null : rating } : e
+      ),
+    }));
+
+  const saveSession = () => {
+    if (!activeProgram || !day) return;
+
+    const normalized = {
+      id: genId(),
+      date,
+      programId: activeProgram.id,
+      dayId: day.id,
+      entries: working.entries.map((e) => ({
+        exerciseId: e.exerciseId,
+        exerciseName: e.exerciseName,
+        rating: e.rating ?? null,
+        sets: e.sets.map((s) => ({
+          reps: clampInt(String(s.reps || "0"), 0, 10000),
+          kg: clampFloat(String(s.kg || "0"), 0, 100000),
+        })),
+      })),
+    };
+
+    const existingIdx = (db.log || []).findIndex(
+      (s) => s.date === date && s.programId === activeProgram.id && s.dayId === day.id
     );
 
-    const newSession = buildSession(program, _programDay, lastSession);
-    newSession.programDayId = _programDay.id;
-    setSession(newSession);
-  };
+    const nextLog =
+      existingIdx >= 0
+        ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
+        : [...(db.log || []), normalized];
 
-  const saveSession = (completed) => {
-    if (!session) return;
-    const toSave = { ...session, completed };
-    const newLog = [...(db.log || []), toSave];
-    setDb({ ...db, log: newLog });
-    setSession(null);
+    setDb({ ...db, log: nextLog });
 
-    // show celebration
-    setCelebrationWorkout(toSave);
-    setCelebrationCompleted(completed);
+    // ---- show celebration (emoji popup) ----
+    const entriesCount = normalized.entries.length;
+    const setsCount = normalized.entries.reduce((acc, e) => acc + (e.sets?.length || 0), 0);
+    setCelebrationMeta({ date: normalized.date, entries: entriesCount, sets: setsCount });
     setShowCelebration(true);
   };
 
-  const cancelSession = () => {
-    setSession(null);
-  };
+  // ---- UI ----
+  if (!activeProgram) {
+    return (
+      <div className="text-sm text-zinc-300">
+        No active program. Create one in the Program tab and set it active.
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 space-y-4">
-      {!session && (
-        <div>
-          <button
-            onClick={startSession}
-            className="px-4 py-2 rounded bg-green-600 text-white"
-          >
-            Start New Workout
-          </button>
+    <div className="space-y-4">
+      {/* Header: program + weeks */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-lg font-semibold">{activeProgram.name}</div>
+        <div className="text-xs text-zinc-400">
+          Started {activeProgram.startDate || "—"} · Week {weeksBetween(activeProgram.startDate) + 1}
         </div>
-      )}
+      </div>
 
-      {session && (
+      {/* Date + Day pickers */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <label className="text-sm text-zinc-300">Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value || todayIso())}
+            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+          />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <label className="text-sm text-zinc-300">Training Day</label>
+          <select
+            value={dayId}
+            onChange={(e) => setDayId(e.target.value)}
+            className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
+          >
+            {dayList.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Entries */}
+      {!day || (working.entries || []).length === 0 ? (
+        <div className="text-sm text-zinc-400">This day has no programmed exercises yet.</div>
+      ) : (
         <div className="space-y-4">
-          <h2 className="text-xl font-bold">
-            Workout — {programDay?.name || "Day"}
-          </h2>
-          {(session.exercises || []).map((ex, i) => (
-            <div key={ex.id} className="border rounded p-2 space-y-2">
-              <h3 className="font-semibold">{ex.name}</h3>
-              {(ex.sets || []).map((set, j) => (
-                <div key={set.id} className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="number"
-                    value={set.weight}
-                    placeholder="Weight"
-                    onChange={(e) => {
-                      const val = clampFloat(e.target.value, 0, 999);
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].weight = val;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 w-24"
-                  />
-                  <input
-                    type="number"
-                    value={set.reps}
-                    placeholder="Reps"
-                    onChange={(e) => {
-                      const val = clampInt(e.target.value, 0, 50);
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].reps = val;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 w-20"
-                  />
-                  <input
-                    type="number"
-                    value={set.rpe}
-                    placeholder="RPE"
-                    onChange={(e) => {
-                      const val = clampFloat(e.target.value, 0, 10);
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].rpe = val;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 w-20"
-                  />
-                  <input
-                    type="text"
-                    value={set.notes}
-                    placeholder="Notes"
-                    onChange={(e) => {
-                      const newSession = { ...session };
-                      newSession.exercises[i].sets[j].notes = e.target.value;
-                      setSession(newSession);
-                    }}
-                    className="border rounded px-2 py-1 flex-1 min-w-[160px]"
-                  />
+          {working.entries.map((entry) => {
+            const prevEntry = lastSession?.entries?.find(
+              (e) => e.exerciseId === entry.exerciseId
+            );
+
+            return (
+              <div key={entry.id} className="rounded border border-zinc-700">
+                <div className="p-3 flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <div className="font-medium">{entry.exerciseName}</div>
+                    <div className="text-xs text-zinc-400">
+                      Target:{" "}
+                      {(() => {
+                        const programmed = day.items.find((it) => it.exerciseId === entry.exerciseId);
+                        const sets = programmed?.sets ?? entry.sets?.length ?? 0;
+                        const reps =
+                          programmed?.reps ?? (entry.sets?.[0]?.reps ? Number(entry.sets[0].reps) : 0);
+                        return `${sets} × ${reps}`;
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* rating buttons */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      className={ratingBtnClasses(entry.rating === "easy", "green")}
+                      onClick={() => setRating(entry.id, "easy")}
+                      title="Felt easy — go up next time"
+                    >
+                      Easy
+                    </button>
+                    <button
+                      className={ratingBtnClasses(entry.rating === "moderate", "orange")}
+                      onClick={() => setRating(entry.id, "moderate")}
+                      title="Felt okay — hold next time"
+                    >
+                      Moderate
+                    </button>
+                    <button
+                      className={ratingBtnClasses(entry.rating === "hard", "red")}
+                      onClick={() => setRating(entry.id, "hard")}
+                      title="Felt hard — go down next time"
+                    >
+                      Hard
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          ))}
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => saveSession(true)}
-              className="px-4 py-2 rounded bg-blue-600 text-white"
-            >
-              Complete
-            </button>
-            <button
-              onClick={() => saveSession(false)}
-              className="px-4 py-2 rounded bg-yellow-500 text-black"
-            >
-              Save Incomplete
-            </button>
-            <button
-              onClick={cancelSession}
-              className="px-4 py-2 rounded bg-red-600 text-white"
-            >
-              Cancel
+
+                <div className="border-t border-zinc-700 p-3 space-y-2">
+                  {entry.sets.map((s, idx) => {
+                    const prevSet = prevEntry?.sets?.[idx];
+                    return (
+                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center">
+                        <div className="text-sm text-zinc-400">Set {idx + 1}</div>
+
+                        {/* Reps input */}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Reps</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            value={String(s.reps)}
+                            onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
+                            placeholder="Reps"
+                            className="p-2 rounded bg-zinc-900 text-zinc-100"
+                            aria-label="Reps"
+                          />
+                        </div>
+
+                        {/* Weight input */}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Weight (kg)</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.5"
+                            value={String(s.kg)}
+                            onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
+                            placeholder="Weight (kg)"
+                            className="p-2 rounded bg-zinc-900 text-zinc-100"
+                            aria-label="Weight in kilograms"
+                          />
+                        </div>
+
+                        {/* Last time */}
+                        <div className="text-xs text-zinc-400">
+                          {prevSet ? `Last: ${prevSet.reps} reps @ ${prevSet.kg} kg` : "—"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="flex justify-end">
+            <button onClick={saveSession} className="px-4 py-2 rounded bg-blue-600 text-white">
+              Save
             </button>
           </div>
         </div>
       )}
 
-      <div>
-        <h2 className="text-xl font-bold mb-2">Workout Log</h2>
-        {(db?.log || []).length === 0 && <p>No workouts yet.</p>}
-        <div className="space-y-2">
-          {(db?.log || [])
-            .slice()
-            .reverse()
-            .map((s) => (
-              <div
-                key={s.id}
-                className="border rounded p-2 space-y-1 bg-white shadow-sm"
-              >
-                <div className="flex justify-between">
-                  <span>{s.date}</span>
-                  <span>{s.completed ? "✅" : "⏸️"}</span>
-                </div>
-                {(s.exercises || []).map((ex) => (
-                  <div key={ex.id} className="ml-4">
-                    <strong>{ex.name}</strong>
-                    <ul className="ml-4 list-disc">
-                      {(ex.sets || []).map((set) => (
-                        <li key={set.id}>
-                          {set.weight}kg × {set.reps} reps (RPE {set.rpe}){" "}
-                          {set.notes}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            ))}
-        </div>
-      </div>
-
       {/* Celebration overlay */}
       <CelebrationModal
         open={showCelebration}
         onClose={() => setShowCelebration(false)}
-        workout={celebrationWorkout}
-        completed={celebrationCompleted}
+        workoutDate={celebrationMeta.date}
+        entriesCount={celebrationMeta.entries}
+        setsCount={celebrationMeta.sets}
       />
     </div>
   );
