@@ -104,7 +104,7 @@ function Portal({ children }) {
   return ReactDOM.createPortal(children, document.body);
 }
 
-/* Edit Modal that cannot crash (guards + fallback viewer) */
+/* Edit Modal (forced black-on-white inputs) */
 function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   const [draft, setDraft] = useState(workout || null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -126,11 +126,11 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
 
   if (!open) return null;
 
-  // Build editable entries with hard guards
+  // Build editable entries with guards
   let entries = [];
   try {
     const src = draft || workout || {};
-    const raw =
+    entries =
       Array.isArray(src?.entries) && src.entries.length
         ? src.entries.map((e) => ({
             exerciseId: e?.exerciseId ?? e?.id ?? e?.exerciseName ?? "ex",
@@ -158,7 +158,6 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
               : [],
           }))
         : [];
-    entries = raw;
   } catch (e) {
     console.error("[EditWorkoutModal] entries-build error:", e?.message || e);
     setErrorMsg(e?.message || String(e));
@@ -205,6 +204,12 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
     }
   };
 
+  const inputClass =
+    "w-full rounded border border-gray-300 px-2 py-1 bg-white text-black placeholder-gray-400 " +
+    "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
+  const labelClass = "text-xs text-gray-700";
+  const setLabelClass = "text-xs text-gray-600";
+
   const headerTitle = (() => {
     try {
       return `${formatShortDate(draft || workout)} • ${morningOrEvening(draft || workout)} • ${dayNumberLabel(
@@ -216,7 +221,6 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
     }
   })();
 
-  // Render via Portal to avoid stacking issues
   return (
     <Portal>
       <div className="fixed inset-0 z-[9999] flex items-center justify-center">
@@ -228,12 +232,12 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
         >
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
-              <h3 className="text-lg font-semibold">{headerTitle}</h3>
-              <p className="text-xs text-gray-500">Edit reps/kg and rating. Save to update history.</p>
+              <h3 className="text-lg font-semibold text-black">{headerTitle}</h3>
+              <p className="text-xs text-gray-600">Edit reps/kg and rating. Save to update history.</p>
             </div>
             <button
               onClick={onClose}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
             >
               Close
             </button>
@@ -255,22 +259,22 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
               {entries.map((e, ei) => (
                 <div key={`${e.exerciseId}-${ei}`} className="rounded-xl border border-gray-200">
                   <div className="flex items-center justify-between gap-2 p-3">
-                    <div className="font-medium">{e.exerciseName}</div>
+                    <div className="font-medium text-blue-600">{e.exerciseName}</div>
                     <div className="flex items-center gap-1">
                       <button
-                        className={`px-2 py-1 rounded text-xs ${e.rating === "easy" ? "bg-green-600 text-white" : "bg-gray-100"}`}
+                        className={`px-2 py-1 rounded text-xs ${e.rating === "easy" ? "bg-green-600 text-white" : "bg-gray-100 text-black"}`}
                         onClick={() => setEntryRating(ei, "easy")}
                       >
                         Easy
                       </button>
                       <button
-                        className={`px-2 py-1 rounded text-xs ${e.rating === "moderate" ? "bg-orange-400 text-black" : "bg-gray-100"}`}
+                        className={`px-2 py-1 rounded text-xs ${e.rating === "moderate" ? "bg-orange-400 text-black" : "bg-gray-100 text-black"}`}
                         onClick={() => setEntryRating(ei, "moderate")}
                       >
                         Moderate
                       </button>
                       <button
-                        className={`px-2 py-1 rounded text-xs ${e.rating === "hard" ? "bg-red-600 text-white" : "bg-gray-100"}`}
+                        className={`px-2 py-1 rounded text-xs ${e.rating === "hard" ? "bg-red-600 text-white" : "bg-gray-100 text-black"}`}
                         onClick={() => setEntryRating(ei, "hard")}
                       >
                         Hard
@@ -280,35 +284,35 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
                   <div className="border-t border-gray-200 p-3 space-y-2">
                     {e.sets.map((s, si) => (
                       <div key={si} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center">
-                        <div className="text-xs text-gray-500">Set {si + 1}</div>
+                        <div className={setLabelClass}>Set {si + 1}</div>
                         <div className="md:col-span-2">
-                          <label className="text-xs text-gray-500">Reps</label>
+                          <label className={labelClass}>Reps</label>
                           <input
                             type="number"
                             value={String(s.reps)}
                             min={0}
                             onChange={(ev) => setEntrySet(ei, si, { reps: Number(ev.target.value || 0) })}
-                            className="w-full rounded border border-gray-300 px-2 py-1"
+                            className={inputClass}
                           />
                         </div>
                         <div className="md:col-span-2">
-                          <label className="text-xs text-gray-500">Weight (kg)</label>
+                          <label className={labelClass}>Weight (kg)</label>
                           <input
                             type="number"
                             value={String(s.kg)}
                             min={0}
                             step="0.5"
                             onChange={(ev) => setEntrySet(ei, si, { kg: Number(ev.target.value || 0) })}
-                            className="w-full rounded border border-gray-300 px-2 py-1"
+                            className={inputClass}
                           />
                         </div>
                         <div>
-                          <label className="text-xs text-gray-500">Notes</label>
+                          <label className={labelClass}>Notes</label>
                           <input
                             type="text"
                             value={s.notes || ""}
                             onChange={(ev) => setEntrySet(ei, si, { notes: ev.target.value })}
-                            className="w-full rounded border border-gray-300 px-2 py-1"
+                            className={inputClass}
                           />
                         </div>
                       </div>
@@ -441,9 +445,8 @@ function RecentWorkoutsCloud({ programs, setDb }) {
                   <button
                     type="button"
                     onClick={() => {
-                      console.log("[RecentWorkoutsCloud] View more clicked →", w.id || key);
                       setSelected(w);
-                      setExpandedId((cur) => (cur === key ? null : key)); // also show inline fallback
+                      setExpandedId((cur) => (cur === key ? null : key)); // inline fallback too
                     }}
                     className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
                   >
@@ -452,7 +455,7 @@ function RecentWorkoutsCloud({ programs, setDb }) {
                 </div>
               </div>
 
-              {/* Inline fallback details (always safe) */}
+              {/* Inline fallback details */}
               {expandedId === key && (
                 <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
                   {getExercisesFromWorkout(w).map((ex, i) => (
@@ -482,6 +485,85 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         programs={programs}
         onSave={saveEditedWorkout}
       />
+    </div>
+  );
+}
+
+/* ───────────────────────── 2-Week Calendar ───────────────────────── */
+function TwoWeekCalendar({ workouts }) {
+  // make a set of ISO dates with at least one meaningful workout
+  const worked = useMemo(() => {
+    const set = new Set();
+    for (const w of workouts) {
+      const d =
+        isoDate(toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || new Date());
+      set.add(d);
+    }
+    return set;
+  }, [workouts]);
+
+  // last 14 days including today
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+  }
+
+  // split into two rows of 7
+  const rows = [days.slice(0, 7), days.slice(7)];
+
+  const cellBase =
+    "h-16 rounded-xl border flex flex-col items-center justify-center gap-1 " +
+    "text-sm";
+  const labelCls = "text-[11px] text-gray-500";
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-base font-semibold">Last 2 Weeks</h3>
+        <p className="text-xs text-gray-500">💪 worked • 😴 rest</p>
+      </div>
+
+      <div className="grid grid-cols-7 gap-2">
+        {rows[0].map((d, i) => {
+          const k = isoDate(d);
+          const didWork = worked.has(k);
+          return (
+            <div
+              key={`r1-${i}`}
+              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"}`}
+              title={k}
+            >
+              <div className="text-base">{didWork ? "💪" : "😴"}</div>
+              <div className={labelCls}>
+                {d.toLocaleDateString(undefined, { weekday: "short" })}
+              </div>
+              <div className="text-xs font-medium">{d.getDate()}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 grid grid-cols-7 gap-2">
+        {rows[1].map((d, i) => {
+          const k = isoDate(d);
+          const didWork = worked.has(k);
+          return (
+            <div
+              key={`r2-${i}`}
+              className={`${cellBase} ${didWork ? "border-green-2 00 bg-green-50" : "border-gray-200 bg-gray-50"}`}
+              title={k}
+            >
+              <div className="text-base">{didWork ? "💪" : "😴"}</div>
+              <div className={labelCls}>
+                {d.toLocaleDateString(undefined, { weekday: "short" })}
+              </div>
+              <div className="text-xs font-medium">{d.getDate()}</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -628,6 +710,9 @@ export default function ProgressTab({ db, setDb }) {
           <p className="mt-1 text-2xl font-semibold">{recent30}</p>
         </div>
       </div>
+
+      {/* 2-week calendar (💪 / 😴) */}
+      <TwoWeekCalendar workouts={filteredLog} />
 
       {/* Last 5 Saved Workouts (cloud) with View more → modal + inline fallback */}
       <RecentWorkoutsCloud programs={programs} setDb={setDb} />
