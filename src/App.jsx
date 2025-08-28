@@ -1,11 +1,10 @@
 // src/App.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { loadDbFromCloud, saveDbToCloud } from "./syncService.js";
 import LogTab from "./tabs/LogTab.jsx";
 import ProgressTab from "./tabs/ProgressTab.jsx";
-// If you have this file, keep the import; otherwise comment it out.
-// import ProgramTab from "./tabs/ProgramTab.jsx";
 
+// ---------- helpers (state shape + merge) ----------
 const LS_KEY = "liftinglog_db_v1";
 
 const sanitizeDb = (db) => ({
@@ -15,18 +14,14 @@ const sanitizeDb = (db) => ({
   _updatedAt: db?._updatedAt ?? null,
 });
 
-// Merge cloud into local but never lose local if cloud is empty/new
 function mergeCloud(localDb, cloudDb) {
   const L = sanitizeDb(localDb);
   const C = sanitizeDb(cloudDb);
-
   const cloudHasContent =
     (C.programs?.length || 0) > 0 || (C.log?.length || 0) > 0 || !!C.activeProgramId;
 
-  // If cloud is empty, keep local
   if (!cloudHasContent) return L;
 
-  // Last write wins by _updatedAt (falls back to cloud)
   const lTime = L._updatedAt ? Date.parse(L._updatedAt) : 0;
   const cTime = C._updatedAt ? Date.parse(C._updatedAt) : 1;
   if (cTime >= lTime) {
@@ -39,6 +34,37 @@ function mergeCloud(localDb, cloudDb) {
   return L;
 }
 
+// ---------- lazy loaders that won't crash if files are missing ----------
+function makeSafeLazy(path, onAvailable) {
+  return function SafeLazyTab(props) {
+    const CompRef = useRef(null);
+    const [, force] = useState(0);
+
+    useEffect(() => {
+      let alive = true;
+      import(/* @vite-ignore */ path)
+        .then((m) => {
+          if (!alive) return;
+          CompRef.current = m.default || m;
+          onAvailable?.(true);
+          force((x) => x + 1);
+        })
+        .catch(() => {
+          onAvailable?.(false);
+          // Keep silent: just means the tab isn't present in this build
+        });
+      return () => {
+        alive = false;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const Comp = CompRef.current;
+    if (!Comp) return null; // not available
+    return <Comp {...props} />;
+  };
+}
+
 export default function App() {
   // 1) Start from localStorage so UI isn’t empty offline
   const [db, setDb] = useState(() => {
@@ -49,13 +75,19 @@ export default function App() {
     return sanitizeDb({});
   });
 
-  const [tab, setTab] = useState("log"); // "log" | "progress" | "program"
+  // Which optional tabs exist?
+  const [hasProgramTab, setHasProgramTab] = useState(false);
+  const [hasExercisesTab, setHasExercisesTab] = useState(false);
+  const ProgramTab = makeSafeLazy("./tabs/ProgramTab.jsx", setHasProgramTab);
+  const ExercisesTab = makeSafeLazy("./tabs/ExercisesTab.jsx", setHasExercisesTab);
+
+  const [tab, setTab] = useState("log"); // "log" | "progress" | "program" | "exercises"
   const [loadingCloud, setLoadingCloud] = useState(true);
   const [savingCloud, setSavingCloud] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [lastError, setLastError] = useState("");
 
-  // counts (for quick sanity)
+  // counts (quick sanity)
   const counts = useMemo(() => {
     const days = (db.programs || []).reduce((acc, p) => acc + (p.days?.length || 0), 0);
     return { programs: db.programs?.length || 0, days, log: db.log?.length || 0 };
@@ -77,7 +109,9 @@ export default function App() {
         if (alive) setLoadingCloud(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // 3) Persist to localStorage on every change
@@ -87,7 +121,7 @@ export default function App() {
     } catch {}
   }, [db]);
 
-  // 4) Autosave to cloud on every change (debounced, no conditions)
+  // 4) Autosave to cloud on every change (debounced)
   useEffect(() => {
     if (loadingCloud) return;
     const handle = setTimeout(async () => {
@@ -145,16 +179,17 @@ export default function App() {
     };
   }, []); // eslint-disable-line
 
-  const TabButton = ({ id, children }) => (
-    <button
-      onClick={() => setTab(id)}
-      className={`px-3 py-2 rounded-lg text-sm border ${
-        tab === id ? "bg-white text-black border-gray-300" : "bg-zinc-900 text-white border-zinc-700"
-      }`}
-    >
-      {children}
-    </button>
-  );
+  const TabButton = ({ id, children, hidden }) =>
+    hidden ? null : (
+      <button
+        onClick={() => setTab(id)}
+        className={`px-3 py-2 rounded-lg text-sm border ${
+          tab === id ? "bg-white text-black border-gray-300" : "bg-zinc-900 text-white border-zinc-700"
+        }`}
+      >
+        {children}
+      </button>
+    );
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -165,8 +200,12 @@ export default function App() {
           <div className="flex items-center gap-2">
             <TabButton id="log">Log</TabButton>
             <TabButton id="progress">Progress</TabButton>
-            {/* Uncomment if you have ProgramTab */}
-            {/* <TabButton id="program">Program</TabButton> */}
+            <TabButton id="program" hidden={!hasProgramTab}>
+              Program
+            </TabButton>
+            <TabButton id="exercises" hidden={!hasExercisesTab}>
+              Exercises
+            </TabButton>
           </div>
         </div>
 
@@ -206,7 +245,8 @@ export default function App() {
       <div className="mx-auto max-w-5xl p-4">
         {tab === "log" && <LogTab db={db} setDb={setDb} />}
         {tab === "progress" && <ProgressTab db={db} setDb={setDb} />}
-        {/* {tab === "program" && <ProgramTab db={db} setDb={setDb} />} */}
+        {tab === "program" && hasProgramTab && <ProgramTab db={db} setDb={setDb} />}
+        {tab === "exercises" && hasExercisesTab && <ExercisesTab db={db} setDb={setDb} />}
       </div>
     </div>
   );
