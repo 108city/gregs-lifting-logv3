@@ -1,18 +1,21 @@
 // src/syncService.js
 import { supabase } from "./supabaseClient";
 
-// Get the current cloud snapshot - matches ProgressTab logic
+// Get the current cloud snapshot
 export async function loadFromCloud() {
+  console.log("loadFromCloud called");
+  
   try {
-    // First try "gregs-device" (matches ProgressTab fallback logic)
+    // Check gregs-device first
     const { data: deviceData, error: deviceError } = await supabase
       .from("lifting_logs")
       .select("data, updated_at")
       .eq("id", "gregs-device")
       .maybeSingle();
 
+    console.log("gregs-device query result:", { deviceData, deviceError });
+
     if (!deviceError && deviceData?.data) {
-      console.log("Loaded from gregs-device row");
       return {
         data: deviceData.data,
         updatedAt: deviceData.updated_at,
@@ -20,92 +23,58 @@ export async function loadFromCloud() {
       };
     }
 
-    // Fallback to "main" if gregs-device doesn't exist or has no data
+    // Fallback to main
     const { data: mainData, error: mainError } = await supabase
       .from("lifting_logs")
       .select("data, updated_at")
       .eq("id", "main")
       .maybeSingle();
 
+    console.log("main query result:", { mainData, mainError });
+
     if (mainError) throw mainError;
     
-    console.log("Loaded from main row");
     return {
       data: mainData?.data || { exercises: [], programs: [], log: [], progress: [], activeProgramId: null },
       updatedAt: mainData?.updated_at || null,
       rowId: "main"
     };
   } catch (error) {
-    console.error("Failed to load from cloud:", error);
+    console.error("loadFromCloud error:", error);
     throw error;
   }
 }
 
-// Save to the same row we loaded from
-let currentRowId = "gregs-device"; // Default to device, will be updated by loadFromCloud
-
-export async function saveToCloud(db, rowId = currentRowId) {
-  console.log(`Saving to cloud (${rowId}):`, { 
-    exercises: db.exercises?.length || 0, 
+// Save a full snapshot to the cloud
+export async function saveToCloud(db, rowId = "gregs-device") {
+  console.log(`saveToCloud called with rowId: ${rowId}`);
+  console.log("Data to save:", {
+    exercises: db.exercises?.length || 0,
     programs: db.programs?.length || 0,
-    log: db.log?.length || 0 
+    log: db.log?.length || 0
   });
   
-  const { error } = await supabase
-    .from("lifting_logs")
-    .upsert({ 
-      id: rowId, 
-      data: db, 
-      updated_at: new Date().toISOString() 
-    }, { 
-      onConflict: "id" 
-    });
+  try {
+    const { data, error } = await supabase
+      .from("lifting_logs")
+      .upsert({ 
+        id: rowId, 
+        data: db, 
+        updated_at: new Date().toISOString() 
+      }, { 
+        onConflict: "id" 
+      });
+      
+    console.log("Supabase upsert result:", { data, error });
     
-  if (error) {
-    console.error("Supabase save error:", error);
-    throw error;
-  }
-  
-  console.log(`Successfully saved to cloud (${rowId})`);
-}
-
-// Update the row ID when we load from cloud
-export function setCurrentRowId(rowId) {
-  currentRowId = rowId;
-}
-
-// Debounced save function
-let saveTimer = null;
-let savePromiseResolver = null;
-let savePromiseRejecter = null;
-
-export function saveToCloudDebounced(db, delay = 800) {
-  if (saveTimer) clearTimeout(saveTimer);
-  
-  return new Promise((resolve, reject) => {
-    if (savePromiseResolver) {
-      savePromiseResolver();
+    if (error) {
+      throw error;
     }
     
-    savePromiseResolver = resolve;
-    savePromiseRejecter = reject;
-    
-    saveTimer = setTimeout(async () => {
-      try {
-        await saveToCloud(db, currentRowId);
-        if (savePromiseResolver) {
-          savePromiseResolver();
-          savePromiseResolver = null;
-          savePromiseRejecter = null;
-        }
-      } catch (e) {
-        console.error("Supabase save failed:", e.message);
-        if (savePromiseRejecter) {
-          savePromiseRejecter(e);
-          savePromiseResolver = null;
-          savePromiseRejecter = null;
-        }
-      }
-    }, delay);
-  });
+    console.log("saveToCloud successful");
+    return data;
+  } catch (error) {
+    console.error("saveToCloud error:", error);
+    throw error;
+  }
 }
