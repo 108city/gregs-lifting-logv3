@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { loadFromCloud, saveToCloudDebounced } from "./syncService";
+import { loadFromCloud, saveToCloudDebounced, setCurrentRowId } from "./syncService";
 import Tabs, { TabsList, TabsTrigger, TabsContent } from "./tabs/Tabs";
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
@@ -37,7 +37,8 @@ export default function App() {
 
         // If cloud has data, prefer it over local
         if (cloud?.data && Object.keys(cloud.data).length) {
-          console.log("Loaded from cloud:", Object.keys(cloud.data));
+          console.log("Loaded from cloud:", Object.keys(cloud.data), "Row ID:", cloud.rowId);
+          setCurrentRowId(cloud.rowId); // Set the row ID for future saves
           setDb(cloud.data);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud.data));
           lastSyncedDb.current = JSON.stringify(cloud.data);
