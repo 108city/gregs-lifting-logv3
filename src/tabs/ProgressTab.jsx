@@ -12,10 +12,8 @@ import {
 } from "recharts";
 import { supabase } from "../supabaseClient.js";
 
-/* ───────────────────────── Utilities & compatibility ───────────────────────── */
-function isoDate(d = new Date()) {
-  return new Date(d).toISOString().slice(0, 10);
-}
+/* ── Utils ── */
+function isoDate(d = new Date()) { return new Date(d).toISOString().slice(0, 10); }
 function toDate(val) {
   if (!val) return null;
   const d = typeof val === "string" || typeof val === "number" ? new Date(val) : val;
@@ -34,22 +32,14 @@ function daysBetween(a, b) {
 function formatShortDate(w) {
   const dt = toDate(w?.date || w?.endedAt || w?.startedAt);
   if (!dt) return "Unknown";
-  return dt.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+  return dt.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 function morningOrEvening(w) {
-  const dt =
-    toDate(w?.startedAt) ||
-    toDate(w?.endedAt) ||
-    (w?.date ? new Date(w.date + "T00:00:00") : null);
+  const dt = toDate(w?.startedAt) || toDate(w?.endedAt) || (w?.date ? new Date(w.date + "T00:00:00") : null);
   if (!dt || Number.isNaN(dt.getTime())) return "—";
-  const h = dt.getHours();
-  return h < 12 ? "Morning" : "Evening";
+  return dt.getHours() < 12 ? "Morning" : "Evening";
 }
-/* support both shapes: exercises[].name/sets[].weight or entries[].exerciseName/sets[].kg */
+/* shapes */
 function getExercisesFromWorkout(w) {
   if (!w) return [];
   if (Array.isArray(w.exercises) && w.exercises.length) {
@@ -65,7 +55,7 @@ function getExercisesFromWorkout(w) {
       name: e?.exerciseName ?? e?.name ?? "Exercise",
       sets: (Array.isArray(e?.sets) ? e.sets : []).map((s) => ({
         reps: Number(s?.reps || 0),
-        weight: Number(s?.kg || 0), // normalize to "weight"
+        weight: Number(s?.kg || 0),
         notes: s?.notes ?? "",
       })),
       rating: e?.rating ?? null,
@@ -74,14 +64,8 @@ function getExercisesFromWorkout(w) {
   }
   return [];
 }
-function getSets(ex) {
-  return Array.isArray(ex?.sets) ? ex.sets : [];
-}
-function setWeight(s) {
-  if (s?.weight !== undefined) return Number(s.weight || 0);
-  if (s?.kg !== undefined) return Number(s.kg || 0);
-  return 0;
-}
+function getSets(ex) { return Array.isArray(ex?.sets) ? ex.sets : []; }
+function setWeight(s) { return s?.weight !== undefined ? Number(s.weight || 0) : Number(s?.kg || 0); }
 function hasRealSet(s) {
   const reps = Number(s?.reps || 0);
   const wt = setWeight(s);
@@ -90,8 +74,7 @@ function hasRealSet(s) {
 }
 function isMeaningfulWorkout(w) {
   const exs = getExercisesFromWorkout(w);
-  if (exs.length === 0) return false;
-  return exs.some((ex) => getSets(ex).some(hasRealSet));
+  return exs.length > 0 && exs.some((ex) => getSets(ex).some(hasRealSet));
 }
 function dayNumberLabel(w, programs) {
   const prog = programs?.find?.((p) => p.id === w?.programId);
@@ -100,7 +83,7 @@ function dayNumberLabel(w, programs) {
   return idx >= 0 ? `Day ${idx + 1}` : "Day ?";
 }
 
-/* ───────────────────────── Safe Portal ───────────────────────── */
+/* ── Portal ── */
 function Portal({ children }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -108,15 +91,11 @@ function Portal({ children }) {
   return ReactDOM.createPortal(children, document.body);
 }
 
-/* ───────────────────────── Editable Modal ───────────────────────── */
+/* ── Editable Modal (saves to Supabase on Save) ── */
 function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   const [draft, setDraft] = useState(workout || null);
+  useEffect(() => { setDraft(workout || null); }, [workout]);
 
-  useEffect(() => {
-    setDraft(workout || null);
-  }, [workout]);
-
-  // build editable entries safely from either shape
   const entries = useMemo(() => {
     if (!draft) return [];
     const exs = getExercisesFromWorkout(draft);
@@ -136,22 +115,21 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
     ? `${formatShortDate(draft)} • ${morningOrEvening(draft)} • ${dayNumberLabel(draft, programs)}`
     : "Workout";
 
-  const setEntryRating = (i, rating) => {
+  const setEntryRating = (i, rating) =>
     setDraft((d) => {
       if (!d) return d;
       const copy = { ...d, entries: entries.map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s })) })) };
       copy.entries[i].rating = copy.entries[i].rating === rating ? null : rating;
       return copy;
     });
-  };
-  const setEntrySet = (i, j, patch) => {
+
+  const setEntrySet = (i, j, patch) =>
     setDraft((d) => {
       if (!d) return d;
       const copy = { ...d, entries: entries.map((e) => ({ ...e, sets: e.sets.map((s) => ({ ...s })) })) };
       copy.entries[i].sets[j] = { ...copy.entries[i].sets[j], ...patch };
       return copy;
     });
-  };
 
   const handleSave = () => {
     if (!draft) return;
@@ -280,7 +258,7 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
   );
 }
 
-/* ───────────────────────── Last 5 (cloud) ───────────────────────── */
+/* ── Last 5 (cloud) ── */
 function RecentWorkoutsCloud({ programs, setDb }) {
   const [items, setItems] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -290,20 +268,13 @@ function RecentWorkoutsCloud({ programs, setDb }) {
 
     async function fetchCloudLog() {
       try {
-        const m = await import("../syncService.js");
+        const m = await import("../syncService.js"); // optional helper; if missing, we fall back to Supabase directly
         if (m && typeof m.loadFromCloud === "function") {
           const cloud = await m.loadFromCloud();
           return Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
         }
       } catch {}
-      // fallback: prefer device row if it exists, else main
-      const { data: dev } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "gregs-device")
-        .maybeSingle();
-      if (Array.isArray(dev?.data?.log)) return dev.data.log;
-
+      // direct supabase fallback
       const { data: main } = await supabase
         .from("lifting_logs")
         .select("data")
@@ -315,24 +286,21 @@ function RecentWorkoutsCloud({ programs, setDb }) {
     (async () => {
       try {
         const log = await fetchCloudLog();
+        if (!alive) return;
         const cleaned = (Array.isArray(log) ? log : []).filter(isMeaningfulWorkout);
         const sorted = [...cleaned].sort(byNewest);
-        if (alive) setItems(sorted.slice(0, 5));
+        setItems(sorted.slice(0, 5));
       } catch (e) {
         console.error("[RecentWorkoutsCloud] Load failed:", e?.message || e);
-        if (alive) setItems([]);
+        setItems([]);
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
-  // Save edited workout back to Supabase + local db
   async function saveEditedWorkout(updated) {
     try {
-      // 1) Load current 'main' row
       const { data: main } = await supabase
         .from("lifting_logs")
         .select("data")
@@ -340,19 +308,13 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         .maybeSingle();
       const base = Array.isArray(main?.data?.log) ? main.data.log : [];
 
-      // 2) Replace or insert
       const idx = base.findIndex((w) => w.id === updated.id);
       const nextLog = idx >= 0 ? base.map((w, i) => (i === idx ? updated : w)) : [updated, ...base];
       const payload = { log: nextLog };
 
-      // 3) Upsert to both rows
       await supabase.from("lifting_logs").upsert([{ id: "main", data: payload }], { onConflict: "id" });
-      await supabase.from("lifting_logs").upsert([{ id: "gregs-device", data: payload }], { onConflict: "id" });
 
-      // 4) Update local app state
       setDb?.((prev) => ({ ...(prev || {}), log: nextLog }));
-
-      // 5) Reflect change in this list
       setItems((prev) => {
         if (!prev) return prev;
         const arr = [...prev];
@@ -360,11 +322,10 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         if (i >= 0) arr[i] = updated;
         return arr;
       });
-
       setSelected(null);
     } catch (e) {
-      console.error("[RecentWorkoutsCloud] Save failed:", e?.message || e);
-      alert("Failed to save changes. Please check the console for details.");
+      console.error("[EditWorkoutModal] Save failed:", e?.message || e);
+      alert("Failed to save changes. Check console for details.");
     }
   }
 
@@ -402,7 +363,6 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         })}
       </div>
 
-      {/* Modal (via Portal) */}
       <EditWorkoutModal
         open={!!selected}
         onClose={() => setSelected(null)}
@@ -414,9 +374,8 @@ function RecentWorkoutsCloud({ programs, setDb }) {
   );
 }
 
-/* ───────────────────────── 2-Week Calendar ───────────────────────── */
+/* ── 2-Week Calendar ── */
 function TwoWeekCalendar({ workouts }) {
-  // Local YYYY-MM-DD key (prevents UTC off-by-one)
   const localIso = (dIn) => {
     const d = new Date(dIn);
     const y = d.getFullYear();
@@ -425,18 +384,15 @@ function TwoWeekCalendar({ workouts }) {
     return `${y}-${m}-${day}`;
   };
 
-  // Dates with at least one meaningful workout (LOCAL)
   const worked = useMemo(() => {
     const set = new Set();
     for (const w of workouts) {
-      const when =
-        toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || new Date();
+      const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || new Date();
       set.add(localIso(when));
     }
     return set;
   }, [workouts]);
 
-  // Last 14 days (local midnights)
   const days = [];
   for (let i = 13; i >= 0; i--) {
     const d = new Date();
@@ -445,9 +401,7 @@ function TwoWeekCalendar({ workouts }) {
   }
   const rows = [days.slice(0, 7), days.slice(7)];
 
-  // Improved cell styling with better spacing for emojis
-  const cellBase =
-    "h-24 rounded-xl border flex flex-col items-center justify-center p-2 text-sm transition-colors";
+  const cellBase = "h-24 rounded-xl border flex flex-col items-center justify-center p-2 text-sm";
   const labelCls = "text-[10px] text-gray-500 font-medium";
 
   return (
@@ -464,15 +418,11 @@ function TwoWeekCalendar({ workouts }) {
           return (
             <div
               key={`r1-${i}`}
-              className={`${cellBase} ${
-                didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
-              }`}
+              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"}`}
               title={key}
             >
               <div className="text-2xl mb-1 leading-none">{didWork ? "💪" : "😴"}</div>
-              <div className={`${labelCls} mb-0.5`}>
-                {d.toLocaleDateString(undefined, { weekday: "short" })}
-              </div>
+              <div className={`${labelCls} mb-0.5`}>{d.toLocaleDateString(undefined, { weekday: "short" })}</div>
               <div className="text-xs font-semibold text-gray-700">{d.getDate()}</div>
             </div>
           );
@@ -486,15 +436,11 @@ function TwoWeekCalendar({ workouts }) {
           return (
             <div
               key={`r2-${i}`}
-              className={`${cellBase} ${
-                didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
-              }`}
+              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"}`}
               title={key}
             >
               <div className="text-2xl mb-1 leading-none">{didWork ? "💪" : "😴"}</div>
-              <div className={`${labelCls} mb-0.5`}>
-                {d.toLocaleDateString(undefined, { weekday: "short" })}
-              </div>
+              <div className={`${labelCls} mb-0.5`}>{d.toLocaleDateString(undefined, { weekday: "short" })}</div>
               <div className="text-xs font-semibold text-gray-700">{d.getDate()}</div>
             </div>
           );
@@ -504,18 +450,16 @@ function TwoWeekCalendar({ workouts }) {
   );
 }
 
-/* ───────────────────────── Main ProgressTab ───────────────────────── */
+/* ── Main ProgressTab ── */
 export default function ProgressTab({ db, setDb }) {
   const log = db?.log || [];
   const programs = db?.programs || [];
 
-  // Only meaningful workouts
   const filteredLog = useMemo(
     () => (Array.isArray(log) ? log.filter(isMeaningfulWorkout) : []),
     [log]
   );
 
-  // Distinct exercise names (only those with real sets)
   const exerciseNames = useMemo(() => {
     const set = new Set();
     for (const w of filteredLog) {
@@ -528,17 +472,13 @@ export default function ProgressTab({ db, setDb }) {
 
   const [selectedExercise, setSelectedExercise] = useState(exerciseNames[0] || "");
   useEffect(() => {
-    if (!selectedExercise && exerciseNames.length) {
-      setSelectedExercise(exerciseNames[0]);
-    } else if (selectedExercise && !exerciseNames.includes(selectedExercise)) {
-      setSelectedExercise(exerciseNames[0] || "");
-    }
-  }, [exerciseNames]); // eslint-disable-line
+    if (!selectedExercise && exerciseNames.length) setSelectedExercise(exerciseNames[0]);
+    else if (selectedExercise && !exerciseNames.includes(selectedExercise)) setSelectedExercise(exerciseNames[0] || "");
+    // eslint-disable-next-line
+  }, [exerciseNames]);
 
-  // Build series + stats for selected exercise
   const { lineSeries, startWeight, maxWeight, diffWeight } = useMemo(() => {
     if (!selectedExercise) return { lineSeries: [], startWeight: 0, maxWeight: 0, diffWeight: 0 };
-
     const points = [];
     for (const w of filteredLog) {
       const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
@@ -546,30 +486,22 @@ export default function ProgressTab({ db, setDb }) {
       for (const ex of getExercisesFromWorkout(w)) {
         if (ex.name !== selectedExercise) continue;
         const realSets = getSets(ex).filter(hasRealSet);
-        if (realSets.length === 0) continue;
+        if (!realSets.length) continue;
         const best = realSets.reduce((m, s) => Math.max(m, setWeight(s)), 0);
         points.push({ date: isoDate(when), weight: best });
       }
     }
-    // combine by date (max per day)
     const byDate = new Map();
-    for (const p of points) {
-      byDate.set(p.date, Math.max(byDate.get(p.date) || 0, p.weight));
-    }
-    const series = Array.from(byDate.entries())
-      .map(([date, weight]) => ({ date, weight }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
+    for (const p of points) byDate.set(p.date, Math.max(byDate.get(p.date) || 0, p.weight));
+    const series = Array.from(byDate.entries()).map(([date, weight]) => ({ date, weight })).sort((a, b) => a.date.localeCompare(b.date));
     const start = series.length ? series[0].weight : 0;
     const max = series.reduce((m, p) => Math.max(m, p.weight), 0);
     return { lineSeries: series, startWeight: start, maxWeight: max, diffWeight: max - start };
   }, [filteredLog, selectedExercise]);
 
-  // KPIs: last 7 & 30 days (meaningful workouts only)
   const { recent7, recent30 } = useMemo(() => {
     const now = new Date();
-    let last7 = 0,
-      last30 = 0;
+    let last7 = 0, last30 = 0;
     for (const w of filteredLog) {
       const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || null;
       if (!when) continue;
@@ -582,7 +514,6 @@ export default function ProgressTab({ db, setDb }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
-      {/* TOP: Exercise selector + stats block */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">Max Weight Progress</h3>
@@ -602,7 +533,6 @@ export default function ProgressTab({ db, setDb }) {
           </div>
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
             <p className="text-xs text-gray-600">Starting Weight KG</p>
@@ -615,13 +545,11 @@ export default function ProgressTab({ db, setDb }) {
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
             <p className="text-xs text-gray-600">Difference KG</p>
             <p className={`mt-1 text-2xl font-semibold ${diffWeight >= 0 ? "text-green-600" : "text-red-600"}`}>
-              {diffWeight >= 0 ? "+" : ""}
-              {diffWeight}
+              {diffWeight >= 0 ? "+" : ""}{diffWeight}
             </p>
           </div>
         </div>
 
-        {/* Line chart */}
         <div className="mt-4 h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={lineSeries} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
@@ -635,7 +563,6 @@ export default function ProgressTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <p className="text-xs text-gray-500">Workouts in Last 7 Days</p>
@@ -647,10 +574,7 @@ export default function ProgressTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* 2-week calendar */}
       <TwoWeekCalendar workouts={filteredLog} />
-
-      {/* Last 5 Saved Workouts */}
       <RecentWorkoutsCloud programs={programs} setDb={setDb} />
     </div>
   );
