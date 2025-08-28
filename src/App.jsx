@@ -21,27 +21,41 @@ export default function App() {
   });
 
   const [activeTab, setActiveTab] = useState("log");
-  const hasHydratedFromCloud = useRef(false); // prevents first-render overwrite
+  const [syncStatus, setSyncStatus] = useState("loading"); // loading, synced, error
+  const hasHydratedFromCloud = useRef(false);
+  const lastSyncedDb = useRef(null);
 
   // 1) Hydrate from cloud at startup
   useEffect(() => {
     let mounted = true;
+    setSyncStatus("loading");
+    
     (async () => {
       try {
         const cloud = await loadFromCloud();
         if (!mounted) return;
 
-        // If cloud has data, prefer it over local (so redeploys pull your state)
+        // If cloud has data, prefer it over local
         if (cloud?.data && Object.keys(cloud.data).length) {
+          console.log("Loaded from cloud:", Object.keys(cloud.data));
           setDb(cloud.data);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud.data));
+          lastSyncedDb.current = JSON.stringify(cloud.data);
+        } else {
+          // No cloud data, use local as source of truth
+          lastSyncedDb.current = JSON.stringify(db);
         }
+        setSyncStatus("synced");
       } catch (e) {
         console.warn("Cloud load failed:", e.message);
+        setSyncStatus("error");
+        // Use local data as fallback
+        lastSyncedDb.current = JSON.stringify(db);
       } finally {
         hasHydratedFromCloud.current = true;
       }
     })();
+    
     return () => {
       mounted = false;
     };
@@ -52,18 +66,51 @@ export default function App() {
     // Always keep a local copy
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-    } catch {}
+    } catch (e) {
+      console.error("Failed to save to localStorage:", e);
+    }
 
-    // Don’t push an initial empty/partial state before we’ve checked the cloud
+    // Don't push initial state before we've checked the cloud
     if (!hasHydratedFromCloud.current) return;
 
-    // Debounced cloud save
-    saveToCloudDebounced(db);
+    // Only sync if data actually changed
+    const currentDbString = JSON.stringify(db);
+    if (currentDbString === lastSyncedDb.current) return;
+
+    console.log("Syncing changes to cloud...", {
+      exercises: db.exercises?.length || 0,
+      programs: db.programs?.length || 0,
+      log: db.log?.length || 0
+    });
+
+    setSyncStatus("loading");
+    
+    // Debounced cloud save with better error handling
+    saveToCloudDebounced(db)
+      .then(() => {
+        setSyncStatus("synced");
+        lastSyncedDb.current = currentDbString;
+        console.log("Successfully synced to cloud");
+      })
+      .catch((error) => {
+        console.error("Cloud sync failed:", error);
+        setSyncStatus("error");
+      });
+
   }, [db]);
 
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
-      <h1 className="text-3xl font-bold mb-6">Greg&apos;s Lifting Log</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold">Greg&apos;s Lifting Log</h1>
+        <div className="text-sm">
+          Sync: {
+            syncStatus === "loading" ? "⏳ Syncing..." :
+            syncStatus === "synced" ? "✅ Synced" :
+            "❌ Error"
+          }
+        </div>
+      </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-4">
