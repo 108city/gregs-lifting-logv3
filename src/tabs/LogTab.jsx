@@ -1,6 +1,5 @@
 // src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "../supabaseClient.js";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const genId = () =>
@@ -38,9 +37,6 @@ const ratingBtnClasses = (active, color) =>
       : "bg-zinc-800 text-zinc-200"
   }`;
 
-/**
- * Build a working session for the UI from the active program/day + last session.
- */
 function seedWorking(db, program, day, date) {
   if (!program || !day) return { date, entries: [] };
 
@@ -98,7 +94,6 @@ export default function LogTab({ db, setDb }) {
 
   const day = dayList.find((d) => d.id === dayId) || null;
 
-  // Build working state
   const [working, setWorking] = useState(() =>
     seedWorking(db, activeProgram, day, date)
   );
@@ -107,7 +102,6 @@ export default function LogTab({ db, setDb }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(day), activeProgram?.id, date, JSON.stringify(db.log)]);
 
-  // last session for per-set info
   const lastSession = useMemo(() => {
     if (!activeProgram || !day) return null;
     return (db.log || [])
@@ -120,7 +114,6 @@ export default function LogTab({ db, setDb }) {
       .sort((a, b) => b.date.localeCompare(a.date))[0];
   }, [db.log, activeProgram?.id, day?.id, date]);
 
-  // --- editing helpers ---
   const editSet = (entryId, setIdx, patch) =>
     setWorking((w) => ({
       ...w,
@@ -142,75 +135,45 @@ export default function LogTab({ db, setDb }) {
       ),
     }));
 
-  // popup state
   const [showPopup, setShowPopup] = useState(false);
-  const [saving, setSaving] = useState(false);
 
-  // Supabase push helper
-  const pushLogToCloud = async (nextLog) => {
-    const payload = { log: nextLog };
-    // Upsert into shared "main"
-    const { error: e1 } = await supabase
-      .from("lifting_logs")
-      .upsert([{ id: "main", data: payload }], { onConflict: "id" });
-    if (e1) throw e1;
-    // Mirror to device row (optional diagnostic)
-    const { error: e2 } = await supabase
-      .from("lifting_logs")
-      .upsert([{ id: "gregs-device", data: payload }], { onConflict: "id" });
-    if (e2) throw e2;
-  };
+  const saveSession = () => {
+    if (!activeProgram || !day) return;
 
-  const saveSession = async () => {
-    if (!activeProgram || !day || saving) return;
-    setSaving(true);
-    try {
-      const normalized = {
-        id: genId(),
-        date,
-        programId: activeProgram.id,
-        dayId: day.id,
-        entries: working.entries.map((e) => ({
-          exerciseId: e.exerciseId,
-          exerciseName: e.exerciseName,
-          rating: e.rating ?? null,
-          sets: e.sets.map((s) => ({
-            reps: clampInt(String(s.reps || "0"), 0, 10000),
-            kg: clampFloat(String(s.kg || "0"), 0, 100000),
-          })),
+    const normalized = {
+      id: genId(),
+      date,
+      programId: activeProgram.id,
+      dayId: day.id,
+      entries: working.entries.map((e) => ({
+        exerciseId: e.exerciseId,
+        exerciseName: e.exerciseName,
+        rating: e.rating ?? null,
+        sets: e.sets.map((s) => ({
+          reps: clampInt(String(s.reps || "0"), 0, 10000),
+          kg: clampFloat(String(s.kg || "0"), 0, 100000),
         })),
-      };
+      })),
+    };
 
-      const existingIdx = (db.log || []).findIndex(
-        (s) =>
-          s.date === date &&
-          s.programId === activeProgram.id &&
-          s.dayId === day.id
-      );
+    const existingIdx = (db.log || []).findIndex(
+      (s) =>
+        s.date === date &&
+        s.programId === activeProgram.id &&
+        s.dayId === day.id
+    );
 
-      const nextLog =
-        existingIdx >= 0
-          ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
-          : [...(db.log || []), normalized];
+    const nextLog =
+      existingIdx >= 0
+        ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
+        : [...(db.log || []), normalized];
 
-      // 1) Update local UI immediately
-      setDb({ ...db, log: nextLog });
+    setDb({ ...db, log: nextLog });
 
-      // 2) Push to Supabase so other devices see it
-      await pushLogToCloud(nextLog);
-
-      // 3) Success popup
-      setShowPopup(true);
-      setTimeout(() => setShowPopup(false), 2000);
-    } catch (err) {
-      console.error("[LogTab] save failed:", err?.message || err);
-      alert("Failed to save to cloud. Please check your connection and try again.");
-    } finally {
-      setSaving(false);
-    }
+    setShowPopup(true);
+    setTimeout(() => setShowPopup(false), 2000);
   };
 
-  // ---- UI ----
   if (!activeProgram) {
     return (
       <div className="text-sm text-zinc-300">
@@ -221,7 +184,6 @@ export default function LogTab({ db, setDb }) {
 
   return (
     <div className="space-y-4 relative">
-      {/* Popup celebration */}
       {showPopup && (
         <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
           <div className="bg-black/70 text-white px-6 py-4 rounded-2xl text-xl animate-bounce">
@@ -230,7 +192,6 @@ export default function LogTab({ db, setDb }) {
         </div>
       )}
 
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-lg font-semibold">{activeProgram.name}</div>
         <div className="text-xs text-zinc-400">
@@ -239,7 +200,6 @@ export default function LogTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* Date + Day pickers */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1">
           <label className="text-sm text-zinc-300">Date</label>
@@ -266,7 +226,6 @@ export default function LogTab({ db, setDb }) {
         </div>
       </div>
 
-      {/* Entries */}
       {!day || (working.entries || []).length === 0 ? (
         <div className="text-sm text-zinc-400">
           This day has no programmed exercises yet.
@@ -301,7 +260,6 @@ export default function LogTab({ db, setDb }) {
                     </div>
                   </div>
 
-                  {/* rating buttons */}
                   <div className="flex items-center gap-1">
                     <button
                       className={ratingBtnClasses(
@@ -393,12 +351,9 @@ export default function LogTab({ db, setDb }) {
           <div className="flex justify-end">
             <button
               onClick={saveSession}
-              disabled={saving}
-              className={`px-4 py-2 rounded text-white ${
-                saving ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
-              }`}
+              className="px-4 py-2 rounded bg-blue-600 text-white"
             >
-              {saving ? "Saving..." : "Save"}
+              Save
             </button>
           </div>
         </div>
