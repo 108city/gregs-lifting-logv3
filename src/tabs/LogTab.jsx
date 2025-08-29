@@ -142,7 +142,7 @@ export default function LogTab({ db, setDb }) {
   // popup state
   const [showPopup, setShowPopup] = useState(false);
 
-  const saveSession = () => {
+  const saveSession = async () => {
     if (!activeProgram || !day) return;
 
     const normalized = {
@@ -173,7 +173,17 @@ export default function LogTab({ db, setDb }) {
         ? (db.log || []).map((s, i) => (i === existingIdx ? normalized : s))
         : [...(db.log || []), normalized];
 
-    setDb({ ...db, log: nextLog });
+    const updatedDb = { ...db, log: nextLog };
+    setDb(updatedDb);
+
+    // Sync to Supabase
+    try {
+      const { saveToCloud } = await import("../syncService.js");
+      await saveToCloud(updatedDb);
+    } catch (error) {
+      console.error("Failed to sync to cloud:", error);
+      // You might want to show an error message to the user here
+    }
 
     // trigger popup
     setShowPopup(true);
