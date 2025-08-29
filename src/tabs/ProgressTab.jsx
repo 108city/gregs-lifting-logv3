@@ -71,7 +71,7 @@ function getExercisesFromWorkout(w) {
       name: e?.exerciseName ?? e?.name ?? "Exercise",
       sets: (Array.isArray(e?.sets) ? e.sets : []).map((s) => ({
         reps: Number(s?.reps || 0),
-        weight: Number(s?.kg || 0), // normalize to "weight"
+        weight: Number(s?.kg || 0),
         notes: s?.notes ?? "",
       })),
     }));
@@ -188,8 +188,9 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
     onClose();
   };
 
-  // ⬇️ Pass the FULL workout object upward
+  // Send the FULL workout upward
   const handleDelete = () => {
+    console.log("[EditWorkoutModal] Confirm delete", workout);
     onDelete(workout);
     setShowDeleteConfirm(false);
     onClose();
@@ -320,7 +321,12 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
           {/* Delete Confirmation Dialog */}
           {showDeleteConfirm && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
-              <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4">
+              <div
+                className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4 pointer-events-auto"
+                role="dialog"
+                aria-modal="true"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <h4 className="text-lg font-semibold text-black mb-2">Delete Workout?</h4>
                 <p className="text-gray-600 mb-4">
                   This will permanently delete this workout from {formatShortDate(workout)}. This action cannot be undone.
@@ -407,7 +413,7 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
     setItems((prevItems) => prevItems.map((w) => (w.id === updatedWorkout.id ? updatedWorkout : w)));
   };
 
-  // ⬇️ Accept the FULL workout object and normalize once
+  // Accept the FULL workout object and normalize once
   const handleDeleteWorkout = (targetWorkout) => {
     const normKeyFromWorkout = (w) => {
       if (!w) return "nil";
@@ -416,7 +422,7 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
       return `ts:${d ? d.getTime() : 0}`;
     };
     const targetKey = normKeyFromWorkout(targetWorkout);
-    console.log("[DELETE] target =", targetKey);
+    console.log("[RecentWorkoutsCloud] delete target =", targetKey);
 
     // Remove from local db
     const updatedLog = (db.log || []).filter((w) => normKeyFromWorkout(w) !== targetKey);
@@ -474,7 +480,7 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
         workout={selected}
         programs={programs}
         onSave={handleSaveWorkout}
-        onDelete={handleDeleteWorkout} // now receives the full workout object
+        onDelete={handleDeleteWorkout} // receives the full workout object
       />
     </div>
   );
