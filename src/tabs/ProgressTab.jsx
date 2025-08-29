@@ -49,6 +49,18 @@ function morningOrEvening(w) {
   const h = dt.getHours();
   return h < 12 ? "Morning" : "Evening";
 }
+
+const clampInt = (v, min, max) => {
+  const n = parseInt(v, 10);
+  if (Number.isNaN(n)) return min;
+  return Math.max(min, Math.min(max, n));
+};
+const clampFloat = (v, min, max) => {
+  const n = parseFloat(v);
+  if (Number.isNaN(n)) return min;
+  return Math.max(min, Math.min(max, n));
+};
+
 /* support both shapes: exercises[].name/sets[].weight or entries[].exerciseName/sets[].kg */
 function getExercisesFromWorkout(w) {
   if (!w) return [];
@@ -96,6 +108,17 @@ function dayNumberLabel(w, programs) {
   return idx >= 0 ? `Day ${idx + 1}` : "Day ?";
 }
 
+const ratingBtnClasses = (active, color) =>
+  `px-2 py-1 rounded text-sm ${
+    active
+      ? color === "green"
+        ? "bg-green-600 text-white"
+        : color === "orange"
+        ? "bg-orange-500 text-black"
+        : "bg-red-600 text-white"
+      : "bg-zinc-800 text-zinc-200"
+  }`;
+
 /* ───────────────────────── Safe Portal Modal ───────────────────────── */
 function Portal({ children }) {
   const [mounted, setMounted] = useState(false);
@@ -104,53 +127,219 @@ function Portal({ children }) {
   return ReactDOM.createPortal(children, document.body);
 }
 
-/* Edit Modal (read-only summary, stable) */
-function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
-  if (!open || !workout) return null;
-  const exercises = getExercisesFromWorkout(workout);
+/* Enhanced Edit Modal with editing capabilities */
+function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }) {
+  const [editedWorkout, setEditedWorkout] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  useEffect(() => {
+    if (open && workout) {
+      // Create editable copy
+      setEditedWorkout(JSON.parse(JSON.stringify(workout)));
+    }
+  }, [open, workout]);
+
+  if (!open || !workout || !editedWorkout) return null;
 
   const headerTitle = `${formatShortDate(workout)} • ${morningOrEvening(
     workout
   )} • ${dayNumberLabel(workout, programs)}`;
 
+  const updateSet = (exerciseIdx, setIdx, field, value) => {
+    setEditedWorkout(prev => {
+      const newWorkout = { ...prev };
+      if (newWorkout.entries) {
+        newWorkout.entries = [...newWorkout.entries];
+        newWorkout.entries[exerciseIdx] = { 
+          ...newWorkout.entries[exerciseIdx],
+          sets: [...newWorkout.entries[exerciseIdx].sets]
+        };
+        newWorkout.entries[exerciseIdx].sets[setIdx] = {
+          ...newWorkout.entries[exerciseIdx].sets[setIdx],
+          [field]: value
+        };
+      }
+      return newWorkout;
+    });
+  };
+
+  const updateRating = (exerciseIdx, rating) => {
+    setEditedWorkout(prev => {
+      const newWorkout = { ...prev };
+      if (newWorkout.entries) {
+        newWorkout.entries = [...newWorkout.entries];
+        newWorkout.entries[exerciseIdx] = {
+          ...newWorkout.entries[exerciseIdx],
+          rating: newWorkout.entries[exerciseIdx].rating === rating ? null : rating
+        };
+      }
+      return newWorkout;
+    });
+  };
+
+  const handleSave = () => {
+    // Normalize the workout data
+    const normalized = {
+      ...editedWorkout,
+      entries: editedWorkout.entries?.map(e => ({
+        ...e,
+        sets: e.sets.map(s => ({
+          reps: clampInt(String(s.reps || "0"), 0, 10000),
+          kg: clampFloat(String(s.kg || "0"), 0, 100000),
+        })),
+      })) || [],
+    };
+    
+    onSave(normalized);
+    onClose();
+  };
+
+  const handleDelete = () => {
+    onDelete(workout.id);
+    onClose();
+    setShowDeleteConfirm(false);
+  };
+
   return (
     <Portal>
       <div className="fixed inset-0 z-[9999] flex items-center justify-center">
         <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-        <div className="relative z-10 w-[min(96vw,840px)] max-h-[88vh] overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-lg font-semibold text-black">{headerTitle}</h3>
-            <button
-              onClick={onClose}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
-            >
-              Close
-            </button>
+        <div className="relative z-10 w-[min(96vw,900px)] max-h-[90vh] overflow-auto rounded-2xl border border-gray-200 bg-white shadow-2xl">
+          {/* Header */}
+          <div className="border-b border-gray-200 p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-lg font-semibold text-black">{headerTitle}</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm text-red-700 hover:bg-red-100"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={onClose}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {exercises.map((ex, i) => (
-              <div key={i} className="rounded-xl border border-gray-200 p-3">
-                <div className="font-medium">{ex.name}</div>
-                <div className="mt-1 text-sm text-gray-700">
-                  {getSets(ex).map((s, j) => (
-                    <span key={j} className="mr-3">
-                      #{j + 1}: {s.reps} × {setWeight(s)}kg
-                    </span>
-                  ))}
+          {/* Content */}
+          <div className="p-5">
+            <div className="space-y-4">
+              {(editedWorkout.entries || []).map((entry, exerciseIdx) => (
+                <div key={exerciseIdx} className="rounded border border-zinc-700 bg-zinc-900">
+                  <div className="p-3 flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <div className="font-medium text-white">{entry.exerciseName}</div>
+                    </div>
+
+                    {/* rating buttons */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        className={ratingBtnClasses(entry.rating === "easy", "green")}
+                        onClick={() => updateRating(exerciseIdx, "easy")}
+                        title="Felt easy — go up next time"
+                      >
+                        Easy
+                      </button>
+                      <button
+                        className={ratingBtnClasses(entry.rating === "moderate", "orange")}
+                        onClick={() => updateRating(exerciseIdx, "moderate")}
+                        title="Felt okay — hold next time"
+                      >
+                        Moderate
+                      </button>
+                      <button
+                        className={ratingBtnClasses(entry.rating === "hard", "red")}
+                        onClick={() => updateRating(exerciseIdx, "hard")}
+                        title="Felt hard — go down next time"
+                      >
+                        Hard
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-zinc-700 p-3 space-y-2">
+                    {(entry.sets || []).map((set, setIdx) => (
+                      <div key={setIdx} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
+                        <div className="text-sm text-zinc-400">Set {setIdx + 1}</div>
+
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Reps</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={String(set.reps || "")}
+                            onChange={(e) => updateSet(exerciseIdx, setIdx, "reps", e.target.value)}
+                            className="p-2 rounded bg-zinc-800 text-zinc-100 border border-zinc-600"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-zinc-400">Weight (kg)</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.5"
+                            value={String(set.kg || "")}
+                            onChange={(e) => updateSet(exerciseIdx, setIdx, "kg", e.target.value)}
+                            className="p-2 rounded bg-zinc-800 text-zinc-100 border border-zinc-600"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="border-t border-gray-200 p-5">
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={onClose}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 text-black"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+
+          {/* Delete Confirmation Dialog */}
+          {showDeleteConfirm && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+              <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4">
+                <h4 className="text-lg font-semibold text-black mb-2">Delete Workout?</h4>
+                <p className="text-gray-600 mb-4">
+                  This will permanently delete this workout from {formatShortDate(workout)}. This action cannot be undone.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50 text-black"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
-            ))}
-          </div>
-
-          <div className="mt-4 flex justify-end">
-            <button
-              onClick={onClose}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-            >
-              Done
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </Portal>
@@ -158,7 +347,7 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave }) {
 }
 
 /* ───────────────────────── Last 5 (cloud) ───────────────────────── */
-function RecentWorkoutsCloud({ programs, setDb }) {
+function RecentWorkoutsCloud({ programs, setDb, db }) {
   const [items, setItems] = useState(null);
   const [selected, setSelected] = useState(null);
 
@@ -207,6 +396,28 @@ function RecentWorkoutsCloud({ programs, setDb }) {
     };
   }, []);
 
+  const handleSaveWorkout = (updatedWorkout) => {
+    // Update the workout in the local database
+    const updatedLog = (db.log || []).map(w => 
+      w.id === updatedWorkout.id ? updatedWorkout : w
+    );
+    setDb({ ...db, log: updatedLog });
+
+    // Update the items list
+    setItems(prevItems => 
+      prevItems.map(w => w.id === updatedWorkout.id ? updatedWorkout : w)
+    );
+  };
+
+  const handleDeleteWorkout = (workoutId) => {
+    // Remove from local database
+    const updatedLog = (db.log || []).filter(w => w.id !== workoutId);
+    setDb({ ...db, log: updatedLog });
+
+    // Update the items list
+    setItems(prevItems => prevItems.filter(w => w.id !== workoutId));
+  };
+
   if (!items || items.length === 0) return null;
 
   return (
@@ -219,20 +430,26 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         {items.map((w, idx) => {
           const key = w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`;
           return (
-            <div key={key} className="rounded-xl border border-gray-200 p-3">
+            <div key={key} className="rounded-xl border border-gray-200 p-4 hover:border-gray-300 transition-colors">
               <div className="flex items-center justify-between">
-                <div className="text-sm">
-                  <div className="font-medium">
-                    {formatShortDate(w)} • {morningOrEvening(w)} • {dayNumberLabel(w, programs)}
+                <div className="space-y-1">
+                  <div className="font-medium text-gray-900">
+                    {formatShortDate(w)}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    {morningOrEvening(w)} • {dayNumberLabel(w, programs)}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {getExercisesFromWorkout(w).length} exercise(s)
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setSelected(w)}
-                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
                   >
-                    View more
+                    View & Edit
                   </button>
                 </div>
               </div>
@@ -241,12 +458,14 @@ function RecentWorkoutsCloud({ programs, setDb }) {
         })}
       </div>
 
-      {/* Modal (via Portal) */}
+      {/* Modal */}
       <EditWorkoutModal
         open={!!selected}
         onClose={() => setSelected(null)}
         workout={selected}
         programs={programs}
+        onSave={handleSaveWorkout}
+        onDelete={handleDeleteWorkout}
       />
     </div>
   );
@@ -489,7 +708,7 @@ export default function ProgressTab({ db, setDb }) {
       <TwoWeekCalendar workouts={filteredLog} />
 
       {/* Last 5 Saved Workouts */}
-      <RecentWorkoutsCloud programs={programs} setDb={setDb} />
+      <RecentWorkoutsCloud programs={programs} setDb={setDb} db={db} />
     </div>
   );
 }
