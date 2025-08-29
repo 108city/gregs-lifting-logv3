@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { supabase } from "../supabaseClient.js";
 
-/* ───────────────────────── Utilities & compatibility ───────────────────────── */
+/* ─────────── Utilities & compatibility ─────────── */
 function isoDate(d = new Date()) {
   return new Date(d).toISOString().slice(0, 10);
 }
@@ -34,11 +34,7 @@ function daysBetween(a, b) {
 function formatShortDate(w) {
   const dt = toDate(w?.date || w?.endedAt || w?.startedAt);
   if (!dt) return "Unknown";
-  return dt.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+  return dt.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 function morningOrEvening(w) {
   const dt =
@@ -61,7 +57,7 @@ const clampFloat = (v, min, max) => {
   return Math.max(min, Math.min(max, n));
 };
 
-/* support both shapes: exercises[].name/sets[].weight or entries[].exerciseName/sets[].kg */
+/* support both shapes: exercises[].name/sets[].weight OR entries[].exerciseName/sets[].kg */
 function getExercisesFromWorkout(w) {
   if (!w) return [];
   if (Array.isArray(w.exercises) && w.exercises.length) {
@@ -75,7 +71,7 @@ function getExercisesFromWorkout(w) {
       name: e?.exerciseName ?? e?.name ?? "Exercise",
       sets: (Array.isArray(e?.sets) ? e.sets : []).map((s) => ({
         reps: Number(s?.reps || 0),
-        weight: Number(s?.kg || 0), // normalize to "weight"
+        weight: Number(s?.kg || 0), // normalize
         notes: s?.notes ?? "",
       })),
     }));
@@ -119,7 +115,7 @@ const ratingBtnClasses = (active, color) =>
       : "bg-zinc-800 text-zinc-200"
   }`;
 
-/* ───────────────────────── Safe Portal Modal ───────────────────────── */
+/* ─────────── Safe Portal ─────────── */
 function Portal({ children }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -127,7 +123,7 @@ function Portal({ children }) {
   return ReactDOM.createPortal(children, document.body);
 }
 
-/* ───────────────────────── Edit Modal (full) ───────────────────────── */
+/* ─────────── Edit Workout Modal (full) ─────────── */
 function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }) {
   const [editedWorkout, setEditedWorkout] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -164,15 +160,15 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
 
   const updateRating = (exerciseIdx, rating) => {
     setEditedWorkout((prev) => {
-      const newWorkout = { ...prev };
-      if (newWorkout.entries) {
-        newWorkout.entries = [...newWorkout.entries];
-        newWorkout.entries[exerciseIdx] = {
-          ...newWorkout.entries[exerciseIdx],
-          rating: newWorkout.entries[exerciseIdx].rating === rating ? null : rating,
+      const nw = { ...prev };
+      if (nw.entries) {
+        nw.entries = [...nw.entries];
+        nw.entries[exerciseIdx] = {
+          ...nw.entries[exerciseIdx],
+          rating: nw.entries[exerciseIdx].rating === rating ? null : rating,
         };
       }
-      return newWorkout;
+      return nw;
     });
   };
 
@@ -354,7 +350,7 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
   );
 }
 
-/* ───────────────────────── Last 5 (cloud) ───────────────────────── */
+/* ─────────── Last 5 (cloud) ─────────── */
 function RecentWorkoutsCloud({ programs, setDb, db }) {
   const [items, setItems] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -405,27 +401,46 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
   }, []);
 
   const handleSaveWorkout = (updatedWorkout) => {
-    // Update the workout in the local database by id (edits typically have id)
-    const updatedLog = (db.log || []).map((w) =>
-      w.id === updatedWorkout.id ? updatedWorkout : w
-    );
+    const updatedLog = (db.log || []).map((w) => (w.id === updatedWorkout.id ? updatedWorkout : w));
     setDb({ ...db, log: updatedLog });
 
-    // Update the items list
-    setItems((prevItems) =>
-      prevItems.map((w) => (w.id === updatedWorkout.id ? updatedWorkout : w))
-    );
+    setItems((prevItems) => prevItems.map((w) => (w.id === updatedWorkout.id ? updatedWorkout : w)));
   };
 
-  // ✅ Option 2: delete using id, else fallback to date/startedAt/endedAt
+  // ✅ Normalized delete (works with id OR date/endedAt/startedAt)
   const handleDeleteWorkout = (workoutId, workoutDateKey) => {
-    const makeKey = (w) => w.id || w.date || w.endedAt || w.startedAt;
-    const targetKey = workoutId || workoutDateKey;
+    const normKeyFromWorkout = (w) => {
+      if (w?.id != null) return `id:${String(w.id)}`;
+      const d = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
+      return `ts:${d ? d.getTime() : 0}`;
+    };
+    const normTargetKey = (() => {
+      if (workoutId != null) return `id:${String(workoutId)}`;
+      const d = toDate(workoutDateKey);
+      return `ts:${d ? d.getTime() : 0}`;
+    })();
 
-    const updatedLog = (db.log || []).filter((w) => makeKey(w) !== targetKey);
+    // Debug (optional)
+    console.log("[DELETE] target =", normTargetKey);
+
+    // Remove from local db
+    const updatedLog = (db.log || []).filter((w) => {
+      const wk = normKeyFromWorkout(w);
+      const keep = wk !== normTargetKey;
+      if (!keep) console.log("[DELETE] removing from db.log:", wk);
+      return keep;
+    });
     setDb({ ...db, log: updatedLog });
 
-    setItems((prevItems) => prevItems.filter((w) => makeKey(w) !== targetKey));
+    // Remove from visible list
+    setItems((prevItems) =>
+      prevItems.filter((w) => {
+        const wk = normKeyFromWorkout(w);
+        const keep = wk !== normTargetKey;
+        if (!keep) console.log("[DELETE] removing from items:", wk);
+        return keep;
+      })
+    );
   };
 
   if (!items || items.length === 0) return null;
@@ -476,13 +491,13 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
         workout={selected}
         programs={programs}
         onSave={handleSaveWorkout}
-        onDelete={handleDeleteWorkout} // passes (id, key) from inside the modal
+        onDelete={handleDeleteWorkout}
       />
     </div>
   );
 }
 
-/* ───────────────────────── 2-Week Calendar ───────────────────────── */
+/* ─────────── 2-Week Calendar ─────────── */
 function TwoWeekCalendar({ workouts }) {
   // Local YYYY-MM-DD key (prevents UTC off-by-one)
   const localIso = (dIn) => {
@@ -571,7 +586,7 @@ function TwoWeekCalendar({ workouts }) {
   );
 }
 
-/* ───────────────────────── Main ProgressTab ───────────────────────── */
+/* ─────────── Main ProgressTab ─────────── */
 export default function ProgressTab({ db, setDb }) {
   const log = db?.log || [];
   const programs = db?.programs || [];
