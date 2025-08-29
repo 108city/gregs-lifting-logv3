@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { supabase } from "../supabaseClient.js";
 
-/* ───────────────────────── Utilities & compatibility ───────────────────────── */
+/* ───────────────────────── Utilities ───────────────────────── */
 function isoDate(d = new Date()) {
   return new Date(d).toISOString().slice(0, 10);
 }
@@ -34,11 +34,7 @@ function daysBetween(a, b) {
 function formatShortDate(w) {
   const dt = toDate(w?.date || w?.endedAt || w?.startedAt);
   if (!dt) return "Unknown";
-  return dt.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+  return dt.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 function morningOrEvening(w) {
   const dt =
@@ -49,7 +45,6 @@ function morningOrEvening(w) {
   const h = dt.getHours();
   return h < 12 ? "Morning" : "Evening";
 }
-
 const clampInt = (v, min, max) => {
   const n = parseInt(v, 10);
   if (Number.isNaN(n)) return min;
@@ -60,8 +55,6 @@ const clampFloat = (v, min, max) => {
   if (Number.isNaN(n)) return min;
   return Math.max(min, Math.min(max, n));
 };
-
-/* support both shapes: exercises[].name/sets[].weight or entries[].exerciseName/sets[].kg */
 function getExercisesFromWorkout(w) {
   if (!w) return [];
   if (Array.isArray(w.exercises) && w.exercises.length) {
@@ -119,7 +112,7 @@ const ratingBtnClasses = (active, color) =>
       : "bg-zinc-800 text-zinc-200"
   }`;
 
-/* ───────────────────────── Safe Portal Modal ───────────────────────── */
+/* ───────────────────────── Safe Portal ───────────────────────── */
 function Portal({ children }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -127,7 +120,7 @@ function Portal({ children }) {
   return ReactDOM.createPortal(children, document.body);
 }
 
-/* EditWorkoutModal (unchanged except passes id/date back to onDelete) */
+/* ───────────────────────── Modal ───────────────────────── */
 function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }) {
   const [editedWorkout, setEditedWorkout] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -168,25 +161,54 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
 
   return (
     <Portal>
-      {/* … content omitted for brevity (same as your current modal) … */}
-      {showDeleteConfirm && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
-          <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4">
-            <h4 className="text-lg font-semibold text-black mb-2">Delete Workout?</h4>
-            <p className="text-gray-600 mb-4">
-              This will permanently delete this workout from {formatShortDate(workout)}.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 rounded-lg border px-3 py-2 text-sm">
-                Cancel
-              </button>
-              <button onClick={handleDelete} className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm text-white">
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+        <div className="relative z-10 w-[min(96vw,900px)] max-h-[90vh] overflow-auto rounded-2xl border bg-white shadow-2xl">
+          <div className="border-b p-5 flex justify-between">
+            <h3 className="text-lg font-semibold">{headerTitle}</h3>
+            <div className="flex gap-2">
+              <button onClick={() => setShowDeleteConfirm(true)} className="border px-3 py-1.5 text-sm text-red-700">
                 Delete
+              </button>
+              <button onClick={onClose} className="border px-3 py-1.5 text-sm">
+                Cancel
               </button>
             </div>
           </div>
+
+          <div className="p-5">
+            {/* render sets etc. */}
+          </div>
+
+          <div className="border-t p-5 flex justify-end gap-3">
+            <button onClick={onClose} className="border px-4 py-2 text-sm">
+              Cancel
+            </button>
+            <button onClick={handleSave} className="bg-blue-600 px-4 py-2 text-sm text-white">
+              Save Changes
+            </button>
+          </div>
+
+          {showDeleteConfirm && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
+              <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4">
+                <h4 className="text-lg font-semibold mb-2">Delete Workout?</h4>
+                <p className="text-gray-600 mb-4">
+                  This will permanently delete this workout. This action cannot be undone.
+                </p>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 border px-3 py-2 text-sm">
+                    Cancel
+                  </button>
+                  <button onClick={handleDelete} className="flex-1 bg-red-600 px-3 py-2 text-sm text-white">
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </Portal>
   );
 }
@@ -206,17 +228,9 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
           return Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
         }
       } catch {}
-      const { data: dev } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "gregs-device")
-        .maybeSingle();
+      const { data: dev } = await supabase.from("lifting_logs").select("data").eq("id", "gregs-device").maybeSingle();
       if (Array.isArray(dev?.data?.log)) return dev.data.log;
-      const { data: main } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "main")
-        .maybeSingle();
+      const { data: main } = await supabase.from("lifting_logs").select("data").eq("id", "main").maybeSingle();
       return Array.isArray(main?.data?.log) ? main.data.log : [];
     }
     (async () => {
@@ -240,11 +254,9 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
     setItems(prevItems => prevItems.map(w => w.id === updatedWorkout.id ? updatedWorkout : w));
   };
 
-  // ✅ Modified delete with fallback key
   const handleDeleteWorkout = (workoutId, workoutDateKey) => {
     const makeKey = (w) => w.id || w.date || w.endedAt || w.startedAt;
     const targetKey = workoutId || workoutDateKey;
-
     const updatedLog = (db.log || []).filter(w => makeKey(w) !== targetKey);
     setDb({ ...db, log: updatedLog });
     setItems(prevItems => prevItems.filter(w => makeKey(w) !== targetKey));
@@ -260,12 +272,12 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
           const key = w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`;
           return (
             <div key={key} className="rounded-xl border p-4">
-              <div className="flex items-center justify-between">
+              <div className="flex justify-between">
                 <div>
                   <div className="font-medium">{formatShortDate(w)}</div>
                   <div className="text-sm text-gray-500">{morningOrEvening(w)} • {dayNumberLabel(w, programs)}</div>
                 </div>
-                <button type="button" onClick={() => setSelected(w)} className="rounded-lg border px-3 py-1.5 text-sm">
+                <button type="button" onClick={() => setSelected(w)} className="border px-3 py-1.5 text-sm">
                   View & Edit
                 </button>
               </div>
@@ -286,5 +298,105 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
   );
 }
 
-/* ───────────────────────── 2-Week Calendar & Main ProgressTab ───────────────────────── */
-// … (leave your TwoWeekCalendar and ProgressTab implementation as-is)
+/* ───────────────────────── 2-Week Calendar ───────────────────────── */
+function TwoWeekCalendar({ workouts }) {
+  const localIso = (dIn) => {
+    const d = new Date(dIn);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const worked = useMemo(() => {
+    const set = new Set();
+    for (const w of workouts) {
+      const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || new Date();
+      set.add(localIso(when));
+    }
+    return set;
+  }, [workouts]);
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+  }
+  const rows = [days.slice(0, 7), days.slice(7)];
+  const cellBase = "h-24 rounded-xl border flex flex-col items-center justify-center p-2 text-sm";
+  const labelCls = "text-[10px] text-gray-500 font-medium";
+  return (
+    <div className="rounded-2xl border bg-white p-4 shadow-sm">
+      <h3 className="mb-4 text-base font-semibold">Last 2 Weeks</h3>
+      <div className="grid grid-cols-7 gap-3">
+        {rows[0].map((d, i) => {
+          const key = localIso(d);
+          const didWork = worked.has(key);
+          return (
+            <div key={`r1-${i}`} className={`${cellBase} ${didWork ? "bg-green-50" : "bg-gray-50"}`} title={key}>
+              <div className="text-2xl mb-1">{didWork ? "💪" : "😴"}</div>
+              <div className={labelCls}>{d.toLocaleDateString(undefined, { weekday: "short" })}</div>
+              <div className="text-xs font-semibold">{d.getDate()}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 grid grid-cols-7 gap-3">
+        {rows[1].map((d, i) => {
+          const key = localIso(d);
+          const didWork = worked.has(key);
+          return (
+            <div key={`r2-${i}`} className={`${cellBase} ${didWork ? "bg-green-50" : "bg-gray-50"}`} title={key}>
+              <div className="text-2xl mb-1">{didWork ? "💪" : "😴"}</div>
+              <div className={labelCls}>{d.toLocaleDateString(undefined, { weekday: "short" })}</div>
+              <div className="text-xs font-semibold">{d.getDate()}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── Main ProgressTab ───────────────────────── */
+export default function ProgressTab({ db, setDb }) {
+  const log = db?.log || [];
+  const programs = db?.programs || [];
+  const filteredLog = useMemo(() => (Array.isArray(log) ? log.filter(isMeaningfulWorkout) : []), [log]);
+
+  const exerciseNames = useMemo(() => {
+    const set = new Set();
+    for (const w of filteredLog) {
+      for (const ex of getExercisesFromWorkout(w)) {
+        if (getSets(ex).some(hasRealSet)) set.add(ex.name);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [filteredLog]);
+
+  const [selectedExercise, setSelectedExercise] = useState(exerciseNames[0] || "");
+  useEffect(() => {
+    if (!selectedExercise && exerciseNames.length) {
+      setSelectedExercise(exerciseNames[0]);
+    } else if (selectedExercise && !exerciseNames.includes(selectedExercise)) {
+      setSelectedExercise(exerciseNames[0] || "");
+    }
+  }, [exerciseNames]); // eslint-disable-line
+
+  const { lineSeries, startWeight, maxWeight, diffWeight } = useMemo(() => {
+    if (!selectedExercise) return { lineSeries: [], startWeight: 0, maxWeight: 0, diffWeight: 0 };
+    const points = [];
+    for (const w of filteredLog) {
+      const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
+      if (!when) continue;
+      for (const ex of getExercisesFromWorkout(w)) {
+        if (ex.name !== selectedExercise) continue;
+        const realSets = getSets(ex).filter(hasRealSet);
+        if (realSets.length === 0) continue;
+        const best = realSets.reduce((m, s) => Math.max(m, setWeight(s)), 0);
+        points.push({ date: isoDate(when), weight: best });
+      }
+    }
+    const byDate = new Map();
+    for (const p of points) {
+      byDate.set(p.date, Math.max(byDate.get(p.date) || 0, p.weight));
+    }
+    const series = Array.from(byDate.entries()).map(([date, weight]) => ({ date, weight }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const start = series.length ? series[
