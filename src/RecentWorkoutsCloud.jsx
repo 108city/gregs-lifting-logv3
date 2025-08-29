@@ -1,6 +1,7 @@
+// src/components/RecentWorkoutsCloud.jsx
 import React, { useEffect, useState } from "react";
 
-/* ---------- local helpers (self-contained) ---------- */
+/* ---- helpers (local, no external deps) ---- */
 function toDate(val) {
   if (!val) return null;
   const d = typeof val === "string" || typeof val === "number" ? new Date(val) : val;
@@ -22,31 +23,27 @@ const normKeyFromWorkout = (w) => {
   const d = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
   return `ts:${d ? d.getTime() : 0}`;
 };
+const hasMeaningfulSet = (s) =>
+  (Number(s?.reps) || 0) > 0 ||
+  (Number(s?.weight) || 0) > 0 ||
+  (Number(s?.rpe) || 0) > 0 ||
+  (typeof s?.notes === "string" && s.notes.trim().length > 0);
+const hasMeaningfulWorkout = (w) => {
+  const exs = Array.isArray(w?.exercises) ? w.exercises : [];
+  if (exs.length === 0) return false;
+  return exs.some((ex) => Array.isArray(ex?.sets) && ex.sets.some(hasMeaningfulSet));
+};
 
 /**
- * RecentWorkoutsCloud
  * Props:
- * - onOpen(workout): callback when user clicks View
- * - deletedWorkout?: pass the *full* workout object that was just deleted (from your modal)
- * - refreshKey?: bump this (e.g. Date.now()) after cloud mutations to refetch the last 5
+ *  - onOpen(workout)
+ *  - deletedWorkout?: the full workout object just deleted (so we remove it locally)
+ *  - refreshKey?: bump to refetch from cloud
  */
 export default function RecentWorkoutsCloud({ onOpen, deletedWorkout, refreshKey }) {
-  const [items, setItems] = useState(null); // null loading, [] empty
+  const [items, setItems] = useState(null); // null = loading, [] = empty
 
-  // A set counts as meaningful if it has any signal: reps>0, weight>0, rpe>0, or notes text
-  const hasMeaningfulSet = (s) =>
-    (Number(s?.reps) || 0) > 0 ||
-    (Number(s?.weight) || 0) > 0 ||
-    (Number(s?.rpe) || 0) > 0 ||
-    (typeof s?.notes === "string" && s.notes.trim().length > 0);
-
-  const hasMeaningfulWorkout = (w) => {
-    const exs = Array.isArray(w?.exercises) ? w.exercises : [];
-    if (exs.length === 0) return false;
-    return exs.some((ex) => Array.isArray(ex?.sets) && ex.sets.some(hasMeaningfulSet));
-  };
-
-  // Fetch last 5 from cloud on mount and when refreshKey changes
+  // Load last 5 from cloud (with Supabase fallback)
   useEffect(() => {
     let alive = true;
 
@@ -55,21 +52,17 @@ export default function RecentWorkoutsCloud({ onOpen, deletedWorkout, refreshKey
         const m = await import("../syncService.js");
         if (m && typeof m.loadFromCloud === "function") {
           const cloud = await m.loadFromCloud();
-          const log = Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
-          return log;
+          return Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
         }
       } catch {
-        /* fall through to fallback */
+        /* fall through */
       }
-
-      // Fallback direct Supabase query to the "main" row
       const { supabase } = await import("../supabaseClient.js");
       const { data, error } = await supabase
         .from("lifting_logs")
         .select("data, updated_at")
         .eq("id", "main")
         .maybeSingle();
-
       if (error) throw error;
       return Array.isArray(data?.data?.log) ? data.data.log : [];
     }
@@ -78,17 +71,12 @@ export default function RecentWorkoutsCloud({ onOpen, deletedWorkout, refreshKey
       try {
         const log = await fetchCloudLog();
         if (!alive) return;
-
         const cleaned = (Array.isArray(log) ? log : []).filter(hasMeaningfulWorkout);
-        if (cleaned.length === 0) {
-          setItems([]); // render nothing
-          return;
-        }
         const sorted = [...cleaned].sort(byNewest);
         setItems(sorted.slice(0, 5));
       } catch (e) {
         console.error("[RecentWorkoutsCloud] Load failed:", e?.message || e);
-        setItems([]); // fail quietly
+        setItems([]);
       }
     })();
 
@@ -97,7 +85,7 @@ export default function RecentWorkoutsCloud({ onOpen, deletedWorkout, refreshKey
     };
   }, [refreshKey]);
 
-  // When parent confirms a delete, remove it here too (so the card disappears immediately)
+  // Remove deleted item immediately when parent confirms deletion
   useEffect(() => {
     if (!deletedWorkout || !Array.isArray(items) || items.length === 0) return;
     const targetKey = normKeyFromWorkout(deletedWorkout);
