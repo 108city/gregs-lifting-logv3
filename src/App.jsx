@@ -23,25 +23,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("log");
   const hasHydratedFromCloud = useRef(false);
 
-  // DEBUG: Manual sync button
-  const manualSync = async () => {
-    console.log("=== MANUAL SYNC START ===");
-    console.log("Current db state:", {
-      exercises: db.exercises?.length || 0,
-      programs: db.programs?.length || 0,
-      log: db.log?.length || 0
-    });
-    
-    try {
-      await saveToCloud(db, "gregs-device");
-      console.log("Manual sync successful!");
-      alert("Manual sync successful!");
-    } catch (e) {
-      console.error("Manual sync failed:", e);
-      alert("Manual sync failed: " + e.message);
-    }
-  };
-
   // 1) Hydrate from cloud at startup
   useEffect(() => {
     let mounted = true;
