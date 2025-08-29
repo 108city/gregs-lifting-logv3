@@ -71,7 +71,7 @@ function getExercisesFromWorkout(w) {
       name: e?.exerciseName ?? e?.name ?? "Exercise",
       sets: (Array.isArray(e?.sets) ? e.sets : []).map((s) => ({
         reps: Number(s?.reps || 0),
-        weight: Number(s?.kg || 0), // normalize
+        weight: Number(s?.kg || 0), // normalize to "weight"
         notes: s?.notes ?? "",
       })),
     }));
@@ -188,9 +188,9 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
     onClose();
   };
 
+  // ⬇️ Pass the FULL workout object upward
   const handleDelete = () => {
-    const key = workout.id || workout.date || workout.endedAt || workout.startedAt;
-    onDelete(workout.id, key);
+    onDelete(workout);
     setShowDeleteConfirm(false);
     onClose();
   };
@@ -407,40 +407,23 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
     setItems((prevItems) => prevItems.map((w) => (w.id === updatedWorkout.id ? updatedWorkout : w)));
   };
 
-  // ✅ Normalized delete (works with id OR date/endedAt/startedAt)
-  const handleDeleteWorkout = (workoutId, workoutDateKey) => {
+  // ⬇️ Accept the FULL workout object and normalize once
+  const handleDeleteWorkout = (targetWorkout) => {
     const normKeyFromWorkout = (w) => {
-      if (w?.id != null) return `id:${String(w.id)}`;
+      if (!w) return "nil";
+      if (w.id != null) return `id:${String(w.id)}`;
       const d = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
       return `ts:${d ? d.getTime() : 0}`;
     };
-    const normTargetKey = (() => {
-      if (workoutId != null) return `id:${String(workoutId)}`;
-      const d = toDate(workoutDateKey);
-      return `ts:${d ? d.getTime() : 0}`;
-    })();
-
-    // Debug (optional)
-    console.log("[DELETE] target =", normTargetKey);
+    const targetKey = normKeyFromWorkout(targetWorkout);
+    console.log("[DELETE] target =", targetKey);
 
     // Remove from local db
-    const updatedLog = (db.log || []).filter((w) => {
-      const wk = normKeyFromWorkout(w);
-      const keep = wk !== normTargetKey;
-      if (!keep) console.log("[DELETE] removing from db.log:", wk);
-      return keep;
-    });
+    const updatedLog = (db.log || []).filter((w) => normKeyFromWorkout(w) !== targetKey);
     setDb({ ...db, log: updatedLog });
 
     // Remove from visible list
-    setItems((prevItems) =>
-      prevItems.filter((w) => {
-        const wk = normKeyFromWorkout(w);
-        const keep = wk !== normTargetKey;
-        if (!keep) console.log("[DELETE] removing from items:", wk);
-        return keep;
-      })
-    );
+    setItems((prevItems) => prevItems.filter((w) => normKeyFromWorkout(w) !== targetKey));
   };
 
   if (!items || items.length === 0) return null;
@@ -491,7 +474,7 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
         workout={selected}
         programs={programs}
         onSave={handleSaveWorkout}
-        onDelete={handleDeleteWorkout}
+        onDelete={handleDeleteWorkout} // now receives the full workout object
       />
     </div>
   );
@@ -499,7 +482,6 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
 
 /* ─────────── 2-Week Calendar ─────────── */
 function TwoWeekCalendar({ workouts }) {
-  // Local YYYY-MM-DD key (prevents UTC off-by-one)
   const localIso = (dIn) => {
     const d = new Date(dIn);
     const y = d.getFullYear();
@@ -508,7 +490,6 @@ function TwoWeekCalendar({ workouts }) {
     return `${y}-${m}-${day}`;
   };
 
-  // Dates with at least one meaningful workout (LOCAL)
   const worked = useMemo(() => {
     const set = new Set();
     for (const w of workouts) {
@@ -519,7 +500,6 @@ function TwoWeekCalendar({ workouts }) {
     return set;
   }, [workouts]);
 
-  // Last 14 days (local midnights)
   const days = [];
   for (let i = 13; i >= 0; i--) {
     const d = new Date();
@@ -591,13 +571,11 @@ export default function ProgressTab({ db, setDb }) {
   const log = db?.log || [];
   const programs = db?.programs || [];
 
-  // Only meaningful workouts
   const filteredLog = useMemo(
     () => (Array.isArray(log) ? log.filter(isMeaningfulWorkout) : []),
     [log]
   );
 
-  // Distinct exercise names (only those with real sets)
   const exerciseNames = useMemo(() => {
     const set = new Set();
     for (const w of filteredLog) {
@@ -617,7 +595,6 @@ export default function ProgressTab({ db, setDb }) {
     }
   }, [exerciseNames]); // eslint-disable-line
 
-  // Build series + stats for selected exercise
   const { lineSeries, startWeight, maxWeight, diffWeight } = useMemo(() => {
     if (!selectedExercise) return { lineSeries: [], startWeight: 0, maxWeight: 0, diffWeight: 0 };
 
@@ -633,7 +610,6 @@ export default function ProgressTab({ db, setDb }) {
         points.push({ date: isoDate(when), weight: best });
       }
     }
-    // combine by date (max per day)
     const byDate = new Map();
     for (const p of points) {
       byDate.set(p.date, Math.max(byDate.get(p.date) || 0, p.weight));
@@ -647,7 +623,6 @@ export default function ProgressTab({ db, setDb }) {
     return { lineSeries: series, startWeight: start, maxWeight: max, diffWeight: max - start };
   }, [filteredLog, selectedExercise]);
 
-  // KPIs: last 7 & 30 days (meaningful workouts only)
   const { recent7, recent30 } = useMemo(() => {
     const now = new Date();
     let last7 = 0,
