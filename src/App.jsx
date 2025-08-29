@@ -34,7 +34,6 @@ export default function App() {
         console.log("=== CLOUD LOAD ===");
         console.log("Cloud data:", cloud);
 
-        // If cloud has data, prefer it over local (so redeploys pull your state)
         if (cloud?.data && Object.keys(cloud.data).length) {
           console.log("Using cloud data");
           setDb(cloud.data);
@@ -54,7 +53,7 @@ export default function App() {
     };
   }, []);
 
-  // 2) Log every state change for debugging
+  // 2) Sync every state change
   useEffect(() => {
     console.log("=== DB STATE CHANGE ===");
     console.log("hasHydrated:", hasHydratedFromCloud.current);
@@ -64,21 +63,17 @@ export default function App() {
       log: db.log?.length || 0
     });
 
-    // Always keep a local copy
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
       console.log("Saved to localStorage");
     } catch {}
 
-    // Don't push an initial empty/partial state before we've checked the cloud
     if (!hasHydratedFromCloud.current) {
       console.log("Skipping cloud sync - not hydrated yet");
       return;
     }
 
     console.log("Triggering cloud sync...");
-    
-    // Direct sync instead of debounced for testing
     saveToCloud(db, "gregs-device")
       .then(() => console.log("Auto sync successful"))
       .catch(e => console.error("Auto sync failed:", e));
@@ -88,12 +83,6 @@ export default function App() {
     <div className="min-h-screen bg-black text-blue-500 p-4">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Greg&apos;s Lifting Log</h1>
-        <button 
-          onClick={manualSync}
-          className="px-4 py-2 bg-green-600 text-white rounded"
-        >
-          Manual Sync
-        </button>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
