@@ -397,6 +397,94 @@ export default function ProgressTab({ db, setDb }) {
     for (const p of points) {
       byDate.set(p.date, Math.max(byDate.get(p.date) || 0, p.weight));
     }
-    const series = Array.from(byDate.entries()).map(([date, weight]) => ({ date, weight }))
+   const series = Array.from(byDate.entries())
+      .map(([date, weight]) => ({ date, weight }))
       .sort((a, b) => a.date.localeCompare(b.date));
-    const start = series.length ? series[
+
+    const start = series.length ? series[0].weight : 0;
+    const max = series.reduce((m, p) => Math.max(m, p.weight), 0);
+    return { lineSeries: series, startWeight: start, maxWeight: max, diffWeight: max - start };
+  }, [filteredLog, selectedExercise]);
+
+  // KPIs
+  const { recent7, recent30 } = useMemo(() => {
+    const now = new Date();
+    let last7 = 0, last30 = 0;
+    for (const w of filteredLog) {
+      const when = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt) || null;
+      if (!when) continue;
+      const diff = daysBetween(when, now);
+      if (diff <= 7) last7++;
+      if (diff <= 30) last30++;
+    }
+    return { recent7: last7, recent30: last30 };
+  }, [filteredLog]);
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-4">
+      {/* Progress chart */}
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <h3 className="mb-4 text-base font-semibold">Max Weight Progress</h3>
+        <div className="mb-4 flex gap-2 items-center">
+          <label className="text-sm text-gray-600">Exercise</label>
+          <select
+            value={selectedExercise}
+            onChange={(e) => setSelectedExercise(e.target.value)}
+            className="border rounded px-2 py-1 text-sm"
+          >
+            {exerciseNames.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div className="p-3 border rounded bg-gray-50">
+            <p className="text-xs text-gray-600">Starting Weight</p>
+            <p className="text-2xl font-semibold">{startWeight}</p>
+          </div>
+          <div className="p-3 border rounded bg-gray-50">
+            <p className="text-xs text-gray-600">Current Max</p>
+            <p className="text-2xl font-semibold">{maxWeight}</p>
+          </div>
+          <div className="p-3 border rounded bg-gray-50">
+            <p className="text-xs text-gray-600">Difference</p>
+            <p className={`text-2xl font-semibold ${diffWeight >= 0 ? "text-green-600" : "text-red-600"}`}>
+              {diffWeight >= 0 ? "+" : ""}{diffWeight}
+            </p>
+          </div>
+        </div>
+
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={lineSeries}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Line type="monotone" dataKey="weight" stroke="#2563eb" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="p-4 border rounded bg-white shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 7 Days</p>
+          <p className="text-2xl font-semibold">{recent7}</p>
+        </div>
+        <div className="p-4 border rounded bg-white shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 30 Days</p>
+          <p className="text-2xl font-semibold">{recent30}</p>
+        </div>
+      </div>
+
+      {/* Calendar */}
+      <TwoWeekCalendar workouts={filteredLog} />
+
+      {/* Last 5 Saved Workouts */}
+      <RecentWorkoutsCloud programs={programs} setDb={setDb} db={db} />
+    </div>
+  );
+}
