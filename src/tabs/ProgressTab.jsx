@@ -654,6 +654,8 @@ export default function ProgressTab({ db, setDb }) {
           if (lowers === "face pulls") displayName = "Face Pull";
           if (lowers === "lateral raise") displayName = "Lateral Raises";
           if (lowers === "db benchpress" || lowers === "db bench press") displayName = "Bench Press";
+          if (lowers === "back squat") displayName = "Squat";
+          if (lowers === "low row") displayName = "Row";
 
           counts[cat].exercises[displayName] = (counts[cat].exercises[displayName] || 0) + sets;
         }

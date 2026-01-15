@@ -169,5 +169,71 @@ export function runMigrations(db) {
         console.log(`[Migrations] ${V2_KEY} complete.`);
     }
 
+    // --- MIGRATION: More Robust Merging (v3) ---
+    const V3_KEY = "merge-duplicates-v3";
+    if (!applied.has(V3_KEY)) {
+        console.log(`[Migrations] Running ${V3_KEY}...`);
+
+        const NORM_MAP_V3 = {
+            "back squat": { name: "Squat", cat: "Legs" },
+            "squat": { name: "Squat", cat: "Legs" },
+            "low row": { name: "Row", cat: "Back" },
+            "row": { name: "Row", cat: "Back" },
+        };
+
+        // 1. Update Logs
+        if (Array.isArray(newDb.log)) {
+            newDb.log = newDb.log.map(workout => {
+                let workoutChanged = false;
+                const newEntries = (workout.entries || []).map(entry => {
+                    const lower = entry.exerciseName.toLowerCase().trim();
+                    const rule = NORM_MAP_V3[lower];
+                    if (rule && entry.exerciseName !== rule.name) {
+                        workoutChanged = true;
+                        return { ...entry, exerciseName: rule.name };
+                    }
+                    return entry;
+                });
+                return workoutChanged ? { ...workout, entries: newEntries } : workout;
+            });
+        }
+
+        // 2. Cleanup & Standardize Exercises List
+        if (Array.isArray(newDb.exercises)) {
+            const targets = new Set(["Squat", "Row"]);
+            const sourcesToDelete = new Set(["back squat", "squat", "low row", "row"]);
+
+            newDb.exercises = newDb.exercises.filter(ex => {
+                const lower = ex.name.toLowerCase().trim();
+                if (sourcesToDelete.has(lower) && !targets.has(ex.name)) return false;
+                return true;
+            });
+
+            newDb.exercises = newDb.exercises.map(ex => {
+                const lower = ex.name.toLowerCase().trim();
+                const rule = NORM_MAP_V3[lower];
+                if (rule && targets.has(ex.name)) {
+                    return { ...ex, category: rule.cat };
+                }
+                return ex;
+            });
+
+            const existing = new Set(newDb.exercises.map(e => e.name));
+            [
+                { name: "Squat", cat: "Legs" },
+                { name: "Row", cat: "Back" }
+            ].forEach(t => {
+                if (!existing.has(t.name)) {
+                    newDb.exercises.push({ id: Date.now() + Math.random(), name: t.name, category: t.cat });
+                }
+            });
+        }
+
+        applied.add(V3_KEY);
+        newDb.migrationsApplied = Array.from(applied);
+        changed = true;
+        console.log(`[Migrations] ${V3_KEY} complete.`);
+    }
+
     return changed ? newDb : null;
 }
