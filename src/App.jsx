@@ -53,13 +53,12 @@ export default function App() {
           mergedDb = migrated;
         }
 
+        hasHydratedFromCloud.current = true;
         setDb(mergedDb);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedDb));
-
       } catch (e) {
         console.warn("Cloud load failed:", e.message);
+        hasHydratedFromCloud.current = true; // Still mark as hydrated to allow local work
       } finally {
-        hasHydratedFromCloud.current = true;
         console.log("Hydration complete");
       }
     })();

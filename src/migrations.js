@@ -269,12 +269,12 @@ export function runMigrations(db) {
         }
     }
 
-    // --- MIGRATION: Robust Merging (v5) ---
-    const V5_KEY = "merge-duplicates-v5";
-    if (!applied.has(V5_KEY)) {
-        console.log(`[Migrations] Running ${V5_KEY}...`);
+    // --- MIGRATION: Definitive Merging & Deduplication (v6) ---
+    const V6_KEY = "definitive-merge-v6";
+    if (!applied.has(V6_KEY)) {
+        console.log(`[Migrations] Running ${V6_KEY}...`);
 
-        const NORM_MAP_V5 = {
+        const CANONICAL_MAP = {
             "face pull": "Face Pull",
             "face pulls": "Face Pull",
             "lateral raise": "Lateral Raises",
@@ -283,11 +283,15 @@ export function runMigrations(db) {
             "db bench press": "Bench Press",
             "bench press": "Bench Press",
             "back squat": "Squat",
+            "back squats": "Squat",
             "squat": "Squat",
+            "squats": "Squat",
             "low row": "Row",
-            "row": "Row"
+            "low rows": "Row",
+            "row": "Row",
+            "rows": "Row"
         };
-        const CAT_MAP_V5 = {
+        const CANONICAL_CATS = {
             "Face Pull": "Back",
             "Lateral Raises": "Shoulders",
             "Bench Press": "Chest",
@@ -295,13 +299,13 @@ export function runMigrations(db) {
             "Row": "Back"
         };
 
-        // 1. Update Logs
+        // 1. Unified Log Normalization
         if (Array.isArray(newDb.log)) {
             newDb.log = newDb.log.map(workout => {
                 let workoutChanged = false;
                 const newEntries = (workout.entries || []).map(entry => {
                     const lower = (entry.exerciseName || "").toLowerCase().trim();
-                    const targetName = NORM_MAP_V5[lower];
+                    const targetName = CANONICAL_MAP[lower];
                     if (targetName && entry.exerciseName !== targetName) {
                         workoutChanged = true;
                         return { ...entry, exerciseName: targetName };
@@ -312,35 +316,41 @@ export function runMigrations(db) {
             });
         }
 
-        // 2. Standardize Exercises List
+        // 2. Aggressive Exercise List Cleanup
         if (Array.isArray(newDb.exercises)) {
-            // Delete duplicates (keep only target names)
+            // First, remove everything that SHOULD be a target but isn't the target name exactly
             newDb.exercises = newDb.exercises.filter(ex => {
                 const lower = (ex.name || "").toLowerCase().trim();
-                const targetName = NORM_MAP_V5[lower];
+                const targetName = CANONICAL_MAP[lower];
+                // If this is a variation of one of our targets, but isn't the EXACT canonical name, kill it
                 if (targetName && ex.name !== targetName) return false;
                 return true;
             });
 
-            // Set categories
+            // Second, set correct categories for the survivors
             newDb.exercises = newDb.exercises.map(ex => {
-                const cat = CAT_MAP_V5[ex.name];
+                const cat = CANONICAL_CATS[ex.name];
                 return cat ? { ...ex, category: cat } : ex;
             });
 
-            // Ensure targets exist
-            const existing = new Set(newDb.exercises.map(e => e.name));
-            Object.entries(CAT_MAP_V5).forEach(([name, cat]) => {
-                if (!existing.has(name)) {
-                    newDb.exercises.push({ id: Date.now() + Math.random(), name, category: cat });
+            // Third, ensure all canonical targets exist exactly once
+            const existingNames = new Set(newDb.exercises.map(e => e.name));
+            Object.entries(CANONICAL_CATS).forEach(([name, cat]) => {
+                if (!existingNames.has(name)) {
+                    newDb.exercises.push({
+                        id: Date.now() + Math.random(),
+                        name,
+                        category: cat,
+                        updatedAt: new Date().toISOString()
+                    });
                 }
             });
         }
 
-        applied.add(V5_KEY);
+        applied.add(V6_KEY);
         newDb.migrationsApplied = Array.from(applied);
         changed = true;
-        console.log(`[Migrations] ${V5_KEY} complete.`);
+        console.log(`[Migrations] ${V6_KEY} complete.`);
     }
 
     return changed ? newDb : null;
