@@ -648,9 +648,14 @@ export default function ProgressTab({ db, setDb }) {
           if (!counts[cat]) counts[cat] = { total: 0, exercises: {} };
           counts[cat].total += sets;
 
-          // Use the display name from the workout but count it under one bucket
-          // To truly merge, we should probably pick one name, but let's at least keep them in one category
-          counts[cat].exercises[ex.name] = (counts[cat].exercises[ex.name] || 0) + sets;
+          // CONSOLIDATE TYPOS (UI Level)
+          let displayName = ex.name;
+          const lowers = displayName.toLowerCase().trim();
+          if (lowers === "face pulls") displayName = "Face Pull";
+          if (lowers === "lateral raise") displayName = "Lateral Raises";
+          if (lowers === "db benchpress" || lowers === "db bench press") displayName = "Bench Press";
+
+          counts[cat].exercises[displayName] = (counts[cat].exercises[displayName] || 0) + sets;
         }
       }
     }
