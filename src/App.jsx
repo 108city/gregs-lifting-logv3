@@ -24,6 +24,8 @@ export default function App() {
   });
 
   const [activeTab, setActiveTab] = useState("log");
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle, syncing, success, error
+  const [syncId, setSyncId] = useState("gregs-device");
   const hasHydratedFromCloud = useRef(false);
 
   // 1) Hydrate from cloud at startup
@@ -54,9 +56,16 @@ export default function App() {
         }
 
         hasHydratedFromCloud.current = true;
+        if (cloud?.rowId) {
+          setSyncId(cloud.rowId);
+        }
+
+        hasHydratedFromCloud.current = true;
         setDb(mergedDb);
+        setSyncStatus("success");
       } catch (e) {
         console.warn("Cloud load failed:", e.message);
+        setSyncStatus("error");
         hasHydratedFromCloud.current = true; // Still mark as hydrated to allow local work
       } finally {
         console.log("Hydration complete");
@@ -85,10 +94,14 @@ export default function App() {
     }
 
     console.log("Triggering cloud sync...");
-    saveToCloud(db, "gregs-device")
-      .then(() => console.log("Auto sync successful"))
-      .catch(e => console.error("Auto sync failed:", e));
-  }, [db]);
+    setSyncStatus("syncing");
+    saveToCloud(db, syncId)
+      .then(() => setSyncStatus("success"))
+      .catch(e => {
+        console.error("Auto sync failed:", e);
+        setSyncStatus("error");
+      });
+  }, [db, syncId]);
 
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
@@ -120,6 +133,25 @@ export default function App() {
           <ExercisesTab db={db} setDb={setDb} />
         </TabsContent>
       </Tabs>
+
+      {/* Sync Footer */}
+      <div className="mt-8 pt-4 border-t border-zinc-900 flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-600 font-medium">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'success' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' :
+                syncStatus === 'syncing' ? 'bg-yellow-500 animate-pulse' :
+                  syncStatus === 'error' ? 'bg-red-500' : 'bg-zinc-700'
+              }`} />
+            <span>{syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'success' ? 'Cloud Synced' : syncStatus === 'error' ? 'Sync Error' : 'Offline'}</span>
+          </div>
+          <div className="bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/50">
+            ID: {syncId}
+          </div>
+        </div>
+        <div>
+          V7.1 ALPHA
+        </div>
+      </div>
     </div>
   );
 }

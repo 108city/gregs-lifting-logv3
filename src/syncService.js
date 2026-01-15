@@ -4,7 +4,7 @@ import { supabase } from "./supabaseClient";
 // Get the current cloud snapshot
 export async function loadFromCloud() {
   console.log("loadFromCloud called");
-  
+
   try {
     // Check gregs-device first
     const { data: deviceData, error: deviceError } = await supabase
@@ -32,12 +32,10 @@ export async function loadFromCloud() {
 
     console.log("main query result:", { mainData, mainError });
 
-    if (mainError) throw mainError;
-    
     return {
       data: mainData?.data || { exercises: [], programs: [], log: [], progress: [], activeProgramId: null },
       updatedAt: mainData?.updated_at || null,
-      rowId: "main"
+      rowId: mainData ? "main" : "gregs-device"
     };
   } catch (error) {
     console.error("loadFromCloud error:", error);
@@ -53,24 +51,24 @@ export async function saveToCloud(db, rowId = "gregs-device") {
     programs: db.programs?.length || 0,
     log: db.log?.length || 0
   });
-  
+
   try {
     const { data, error } = await supabase
       .from("lifting_logs")
-      .upsert({ 
-        id: rowId, 
-        data: db, 
-        updated_at: new Date().toISOString() 
-      }, { 
-        onConflict: "id" 
+      .upsert({
+        id: rowId,
+        data: db,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: "id"
       });
-      
+
     console.log("Supabase upsert result:", { data, error });
-    
+
     if (error) {
       throw error;
     }
-    
+
     console.log("saveToCloud successful");
     return data;
   } catch (error) {
