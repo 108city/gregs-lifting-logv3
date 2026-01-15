@@ -269,28 +269,35 @@ export function runMigrations(db) {
         }
     }
 
-    // --- MIGRATION: Definitive Merging & Deduplication (v6) ---
-    const V6_KEY = "definitive-merge-v6";
-    if (!applied.has(V6_KEY)) {
-        console.log(`[Migrations] Running ${V6_KEY}...`);
+    // --- MIGRATION: Robust "Row" & "Squat" Fix (v7) ---
+    const V7_KEY = "definitive-merge-v7";
+    if (!applied.has(V7_KEY)) {
+        console.log(`[Migrations] Running ${V7_KEY}...`);
+
+        // Helper to normalize strings for comparison (strip non-alpha, lowercase)
+        const ultraNormalize = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "").trim();
 
         const CANONICAL_MAP = {
-            "face pull": "Face Pull",
-            "face pulls": "Face Pull",
-            "lateral raise": "Lateral Raises",
-            "lateral raises": "Lateral Raises",
-            "db benchpress": "Bench Press",
-            "db bench press": "Bench Press",
-            "bench press": "Bench Press",
-            "back squat": "Squat",
-            "back squats": "Squat",
-            "squat": "Squat",
-            "squats": "Squat",
-            "low row": "Row",
-            "low rows": "Row",
-            "row": "Row",
-            "rows": "Row"
+            [ultraNormalize("face pull")]: "Face Pull",
+            [ultraNormalize("face pulls")]: "Face Pull",
+            [ultraNormalize("facepull")]: "Face Pull",
+            [ultraNormalize("lateral raise")]: "Lateral Raises",
+            [ultraNormalize("lateral raises")]: "Lateral Raises",
+            [ultraNormalize("lateralraise")]: "Lateral Raises",
+            [ultraNormalize("db benchpress")]: "Bench Press",
+            [ultraNormalize("db bench press")]: "Bench Press",
+            [ultraNormalize("bench press")]: "Bench Press",
+            [ultraNormalize("benchpress")]: "Bench Press",
+            [ultraNormalize("back squat")]: "Squat",
+            [ultraNormalize("back squats")]: "Squat",
+            [ultraNormalize("squat")]: "Squat",
+            [ultraNormalize("squats")]: "Squat",
+            [ultraNormalize("low row")]: "Row",
+            [ultraNormalize("low rows")]: "Row",
+            [ultraNormalize("row")]: "Row",
+            [ultraNormalize("rows")]: "Row"
         };
+
         const CANONICAL_CATS = {
             "Face Pull": "Back",
             "Lateral Raises": "Shoulders",
@@ -299,13 +306,13 @@ export function runMigrations(db) {
             "Row": "Back"
         };
 
-        // 1. Unified Log Normalization
+        // 1. Update Logs
         if (Array.isArray(newDb.log)) {
             newDb.log = newDb.log.map(workout => {
                 let workoutChanged = false;
                 const newEntries = (workout.entries || []).map(entry => {
-                    const lower = (entry.exerciseName || "").toLowerCase().trim();
-                    const targetName = CANONICAL_MAP[lower];
+                    const norm = ultraNormalize(entry.exerciseName);
+                    const targetName = CANONICAL_MAP[norm];
                     if (targetName && entry.exerciseName !== targetName) {
                         workoutChanged = true;
                         return { ...entry, exerciseName: targetName };
@@ -316,27 +323,46 @@ export function runMigrations(db) {
             });
         }
 
-        // 2. Aggressive Exercise List Cleanup
+        // 2. Standardize Exercises List
         if (Array.isArray(newDb.exercises)) {
-            // First, remove everything that SHOULD be a target but isn't the target name exactly
-            newDb.exercises = newDb.exercises.filter(ex => {
-                const lower = (ex.name || "").toLowerCase().trim();
-                const targetName = CANONICAL_MAP[lower];
-                // If this is a variation of one of our targets, but isn't the EXACT canonical name, kill it
-                if (targetName && ex.name !== targetName) return false;
-                return true;
+            const seenNorms = new Set();
+            const cleanedExercises = [];
+
+            // Sort so we process exact canonical names first (preferring them)
+            const sortedToProcess = [...newDb.exercises].sort((a, b) => {
+                const aTarget = CANONICAL_MAP[ultraNormalize(a.name)];
+                const bTarget = CANONICAL_MAP[ultraNormalize(b.name)];
+                if (a.name === aTarget && b.name !== bTarget) return -1;
+                if (b.name === bTarget && a.name !== aTarget) return 1;
+                return 0;
             });
 
-            // Second, set correct categories for the survivors
-            newDb.exercises = newDb.exercises.map(ex => {
-                const cat = CANONICAL_CATS[ex.name];
-                return cat ? { ...ex, category: cat } : ex;
+            sortedToProcess.forEach(ex => {
+                const norm = ultraNormalize(ex.name);
+                const targetName = CANONICAL_MAP[norm] || ex.name;
+                const finalNorm = ultraNormalize(targetName);
+
+                if (!seenNorms.has(finalNorm)) {
+                    seenNorms.add(finalNorm);
+                    // Update the exercise itself if it's a variation
+                    if (CANONICAL_MAP[norm]) {
+                        cleanedExercises.push({
+                            ...ex,
+                            name: targetName,
+                            category: CANONICAL_CATS[targetName] || ex.category
+                        });
+                    } else {
+                        cleanedExercises.push(ex);
+                    }
+                }
             });
 
-            // Third, ensure all canonical targets exist exactly once
-            const existingNames = new Set(newDb.exercises.map(e => e.name));
+            newDb.exercises = cleanedExercises;
+
+            // Ensure all targets exist
+            const currentExNames = new Set(newDb.exercises.map(e => e.name));
             Object.entries(CANONICAL_CATS).forEach(([name, cat]) => {
-                if (!existingNames.has(name)) {
+                if (!currentExNames.has(name)) {
                     newDb.exercises.push({
                         id: Date.now() + Math.random(),
                         name,
@@ -347,10 +373,10 @@ export function runMigrations(db) {
             });
         }
 
-        applied.add(V6_KEY);
+        applied.add(V7_KEY);
         newDb.migrationsApplied = Array.from(applied);
         changed = true;
-        console.log(`[Migrations] ${V6_KEY} complete.`);
+        console.log(`[Migrations] ${V7_KEY} complete.`);
     }
 
     return changed ? newDb : null;
