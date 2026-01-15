@@ -94,5 +94,80 @@ export function runMigrations(db) {
         console.log(`[Migrations] ${MIGRATION_KEY} complete.`);
     }
 
+    // --- MIGRATION: Robust Merging (v2) ---
+    const V2_KEY = "merge-duplicates-v2";
+    if (!applied.has(V2_KEY)) {
+        console.log(`[Migrations] Running ${V2_KEY}...`);
+
+        // Normalization Map (lowercase source -> { targetName, category })
+        const NORM_MAP = {
+            "face pull": { name: "Face Pull", cat: "Back" },
+            "face pulls": { name: "Face Pull", cat: "Back" },
+            "lateral raise": { name: "Lateral Raises", cat: "Shoulders" },
+            "lateral raises": { name: "Lateral Raises", cat: "Shoulders" },
+            "db benchpress": { name: "Bench Press", cat: "Chest" },
+            "db bench press": { name: "Bench Press", cat: "Chest" },
+            "bench press": { name: "Bench Press", cat: "Chest" },
+        };
+
+        // 1. Update Logs
+        if (Array.isArray(newDb.log)) {
+            newDb.log = newDb.log.map(workout => {
+                let workoutChanged = false;
+                const newEntries = (workout.entries || []).map(entry => {
+                    const lower = entry.exerciseName.toLowerCase().trim();
+                    const rule = NORM_MAP[lower];
+                    if (rule && entry.exerciseName !== rule.name) {
+                        workoutChanged = true;
+                        return { ...entry, exerciseName: rule.name };
+                    }
+                    return entry;
+                });
+                return workoutChanged ? { ...workout, entries: newEntries } : workout;
+            });
+        }
+
+        // 2. Cleanup & Standardize Exercises List
+        if (Array.isArray(newDb.exercises)) {
+            // Create a set of "Source" names to delete (the ones that AREN'T the target names)
+            const targets = new Set(["Face Pull", "Bench Press", "Lateral Raises"]);
+            const sourcesToDelete = new Set(["face pulls", "face pull", "lateral raise", "lateral raises", "db benchpress", "db bench press", "bench press"]);
+
+            // Filter out anything that matches our sources UNLESS it is the exact target name we want to keep
+            newDb.exercises = newDb.exercises.filter(ex => {
+                const lower = ex.name.toLowerCase().trim();
+                if (sourcesToDelete.has(lower) && !targets.has(ex.name)) return false;
+                return true;
+            });
+
+            // Update categories for targets
+            newDb.exercises = newDb.exercises.map(ex => {
+                const lower = ex.name.toLowerCase().trim();
+                const rule = NORM_MAP[lower];
+                if (rule && targets.has(ex.name)) {
+                    return { ...ex, category: rule.cat };
+                }
+                return ex;
+            });
+
+            // Ensure they exist
+            const existing = new Set(newDb.exercises.map(e => e.name));
+            [
+                { name: "Face Pull", cat: "Back" },
+                { name: "Bench Press", cat: "Chest" },
+                { name: "Lateral Raises", cat: "Shoulders" }
+            ].forEach(t => {
+                if (!existing.has(t.name)) {
+                    newDb.exercises.push({ id: Date.now() + Math.random(), name: t.name, category: t.cat });
+                }
+            });
+        }
+
+        applied.add(V2_KEY);
+        newDb.migrationsApplied = Array.from(applied);
+        changed = true;
+        console.log(`[Migrations] ${V2_KEY} complete.`);
+    }
+
     return changed ? newDb : null;
 }
