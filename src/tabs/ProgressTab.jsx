@@ -617,29 +617,39 @@ export default function ProgressTab({ db, setDb }) {
     const counts = {};
     const exercises = db?.exercises || [];
 
-    // Map exercise name to category
+    // Map exercise name to category (normalize key)
     const catMap = new Map();
-    exercises.forEach(ex => catMap.set(ex.name, ex.category || "Other"));
+    exercises.forEach(ex => {
+      if (ex.name) {
+        catMap.set(ex.name.toLowerCase().trim(), ex.category || "Other");
+      }
+    });
 
     for (const w of filteredLog) {
       const exs = getExercisesFromWorkout(w);
       for (const ex of exs) {
         // only count if meaningful
         const sets = getSets(ex).filter(hasRealSet).length;
-        if (sets > 0) {
+        const normalizedName = (ex.name || "").toLowerCase().trim();
+
+        if (sets > 0 && normalizedName) {
           // Find category
-          let cat = catMap.get(ex.name) || "Other";
+          let cat = catMap.get(normalizedName) || "Other";
+
           // auto-detect if missing from map (fallback)
           if (cat === "Other") {
-            const lower = ex.name.toLowerCase();
-            if (lower.includes("bench") || lower.includes("fly") || lower.includes("press")) cat = "Chest/Push";
-            else if (lower.includes("row") || lower.includes("pull") || lower.includes("dead")) cat = "Back/Pull";
-            else if (lower.includes("squat") || lower.includes("leg") || lower.includes("calf")) cat = "Legs";
-            else if (lower.includes("curl") || lower.includes("tricep")) cat = "Arms";
+            if (normalizedName.includes("bench") || normalizedName.includes("fly") || normalizedName.includes("press")) cat = "Chest";
+            else if (normalizedName.includes("row") || normalizedName.includes("pull") || normalizedName.includes("dead")) cat = "Back";
+            else if (normalizedName.includes("squat") || normalizedName.includes("leg") || normalizedName.includes("calf")) cat = "Legs";
+            else if (normalizedName.includes("curl") || normalizedName.includes("tricep")) cat = "Arms";
+            else if (normalizedName.includes("shoulder") || normalizedName.includes("lateral") || normalizedName.includes("overhead")) cat = "Shoulders";
           }
 
           if (!counts[cat]) counts[cat] = { total: 0, exercises: {} };
           counts[cat].total += sets;
+
+          // Use the display name from the workout but count it under one bucket
+          // To truly merge, we should probably pick one name, but let's at least keep them in one category
           counts[cat].exercises[ex.name] = (counts[cat].exercises[ex.name] || 0) + sets;
         }
       }
