@@ -25,6 +25,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState("log");
   const [syncStatus, setSyncStatus] = useState("idle"); // idle, syncing, success, error
+  const [syncError, setSyncError] = useState("");
   const [syncId, setSyncId] = useState("gregs-device");
   const hasHydratedFromCloud = useRef(false);
 
@@ -56,15 +57,11 @@ export default function App() {
         }
 
         hasHydratedFromCloud.current = true;
-        if (cloud?.rowId) {
-          setSyncId(cloud.rowId);
-        }
-
-        hasHydratedFromCloud.current = true;
         setDb(mergedDb);
         setSyncStatus("success");
       } catch (e) {
         console.warn("Cloud load failed:", e.message);
+        setSyncError(e.message);
         setSyncStatus("error");
         hasHydratedFromCloud.current = true; // Still mark as hydrated to allow local work
       } finally {
@@ -96,12 +93,32 @@ export default function App() {
     console.log("Triggering cloud sync...");
     setSyncStatus("syncing");
     saveToCloud(db, syncId)
-      .then(() => setSyncStatus("success"))
+      .then(() => {
+        setSyncStatus("success");
+        setSyncError("");
+      })
       .catch(e => {
         console.error("Auto sync failed:", e);
+        setSyncError(e.message);
         setSyncStatus("error");
       });
   }, [db, syncId]);
+
+  const forceSync = async () => {
+    setSyncStatus("syncing");
+    try {
+      const cloud = await loadFromCloud();
+      if (cloud?.data) {
+        setDb(cloud.data);
+        if (cloud.rowId) setSyncId(cloud.rowId);
+        setSyncStatus("success");
+        setSyncError("");
+      }
+    } catch (e) {
+      setSyncError(e.message);
+      setSyncStatus("error");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-black text-blue-500 p-4">
@@ -142,14 +159,20 @@ export default function App() {
                 syncStatus === 'syncing' ? 'bg-yellow-500 animate-pulse' :
                   syncStatus === 'error' ? 'bg-red-500' : 'bg-zinc-700'
               }`} />
-            <span>{syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'success' ? 'Cloud Synced' : syncStatus === 'error' ? 'Sync Error' : 'Offline'}</span>
+            <span>{syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'success' ? 'Cloud Synced' : syncStatus === 'error' ? `Error: ${syncError}` : 'Offline'}</span>
           </div>
-          <div className="bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/50">
+          <div className="bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/50 flex items-center gap-2">
             ID: {syncId}
+            <button
+              onClick={forceSync}
+              className="ml-2 text-[8px] bg-zinc-800 hover:bg-zinc-700 px-1.5 py-0.5 rounded border border-zinc-700 transition-colors"
+            >
+              🔄 REFRESH
+            </button>
           </div>
         </div>
         <div>
-          V7.1 ALPHA
+          V7.2 ALPHA
         </div>
       </div>
     </div>
