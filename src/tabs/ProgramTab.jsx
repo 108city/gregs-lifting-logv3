@@ -1,11 +1,14 @@
 // src/tabs/ProgramTab.jsx
 import React, { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 
-// Small id helper (no uuid package needed)
-const genId = () =>
-  Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+// --- Helpers ---
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-// Weeks between two ISO dates (inclusive start week as week 1)
 const weeksBetween = (startIso, endIso = new Date().toISOString().slice(0, 10)) => {
   try {
     const a = new Date(startIso + "T00:00:00Z");
@@ -18,589 +21,421 @@ const weeksBetween = (startIso, endIso = new Date().toISOString().slice(0, 10)) 
   }
 };
 
-export default function ProgramTab({ db, setDb }) {
-  // ---------- Draft program builder ----------
-  const [name, setName] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [days, setDays] = useState([
-    { id: genId(), name: "Day 1", items: [] }, // items: [{id, exerciseId, name, sets, reps}]
-  ]);
+// --- Sub-components ---
 
-  const exercisesSorted = useMemo(
-    () => (db.exercises || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
-    [db.exercises]
+function ProgramList({ programs, activeProgramId, onSelect, onCreate, onSetActive, onDelete }) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-white">Your Programs</h2>
+        <Button onClick={onCreate} className="bg-blue-600 hover:bg-blue-700 text-white">
+          + New Program
+        </Button>
+      </div>
+
+      {programs.length === 0 ? (
+        <div className="text-center py-10 text-zinc-500 border border-dashed border-zinc-800 rounded-lg">
+          <p>No programs found.</p>
+          <Button variant="link" onClick={onCreate} className="text-blue-500 mt-2">
+            Create your first program
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {programs.map((p) => {
+            const isActive = p.id === activeProgramId;
+
+            // Duration Logic
+            let durationLabel = "No start date";
+            if (p.startDate) {
+              if (isActive) {
+                const w = weeksBetween(p.startDate) + 1;
+                durationLabel = `Current • Week ${w}`;
+              } else if (p.endDate) {
+                const w = weeksBetween(p.startDate, p.endDate) + 1;
+                durationLabel = `Completed • ran for ${w} week${w === 1 ? '' : 's'}`;
+              } else {
+                // Fallback for old/inactive programs without end date
+                durationLabel = `Started ${p.startDate}`;
+              }
+            }
+
+            return (
+              <Card
+                key={p.id}
+                className={`bg-zinc-900 border-zinc-800 hover:border-zinc-600 transition-colors cursor-pointer group ${isActive ? 'ring-2 ring-blue-500/50' : ''}`}
+                onClick={() => onSelect(p.id)}
+              >
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <CardTitle className="text-white text-xl">{p.name}</CardTitle>
+                      <CardDescription className="text-zinc-400 mt-1">
+                        {p.days?.length || 0} Days • {durationLabel}
+                      </CardDescription>
+                    </div>
+                    {isActive && (
+                      <span className="bg-blue-900/30 text-blue-400 text-xs px-2 py-1 rounded border border-blue-900/50">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardFooter className="flex justify-between pt-0">
+                  <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(p.id);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    {!isActive && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSetActive(p.id);
+                        }}
+                      >
+                        Set Active
+                      </Button>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-red-400 hover:text-red-300 hover:bg-red-900/20 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(p.id);
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </CardFooter>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
+}
+
+function ProgramEditor({ program, exercises, onSave, onCancel }) {
+  // Local state for editing to avoid polluting the DB on every keystroke
+  const [draft, setDraft] = useState(JSON.parse(JSON.stringify(program)));
+
+  // -- Handlers for draft modification --
+  const updateField = (field, value) => setDraft(d => ({ ...d, [field]: value }));
 
   const addDay = () => {
-    setDays((d) => [...d, { id: genId(), name: `Day ${d.length + 1}`, items: [] }]);
+    setDraft(d => ({ ...d, days: [...(d.days || []), { id: genId(), name: `Day ${(d.days?.length || 0) + 1}`, items: [] }] }));
   };
 
-  const renameDay = (dayId, newName) => {
-    setDays((d) => d.map((day) => (day.id === dayId ? { ...day, name: newName } : day)));
+  const removeDay = (dayId) => {
+    setDraft(d => ({ ...d, days: d.days.filter(x => x.id !== dayId) }));
   };
 
-  const deleteDay = (dayId) => {
-    setDays((d) => d.filter((day) => day.id !== dayId));
+  const renameDay = (dayId, name) => {
+    setDraft(d => ({ ...d, days: d.days.map(x => x.id === dayId ? { ...x, name } : x) }));
   };
 
-  const addExerciseToDraftDay = (dayId, exerciseId) => {
-    if (!exerciseId) return;
-    const ex = (db.exercises || []).find((e) => e.id === exerciseId);
+  const addExercise = (dayId, exerciseId) => {
+    const ex = exercises.find(e => e.id === exerciseId);
     if (!ex) return;
-    setDays((d) =>
-      d.map((day) =>
+    setDraft(d => ({
+      ...d,
+      days: d.days.map(day =>
         day.id === dayId
-          ? {
-              ...day,
-              items: [
-                ...day.items,
-                { id: genId(), exerciseId, name: ex.name, sets: 3, reps: 10 },
-              ],
-            }
+          ? { ...day, items: [...day.items, { id: genId(), exerciseId, name: ex.name, sets: 3, reps: 10 }] }
           : day
       )
-    );
+    }));
   };
 
-  const updateDraftItemField = (dayId, itemId, field, value) => {
-    setDays((d) =>
-      d.map((day) =>
+  const removeExercise = (dayId, itemId) => {
+    setDraft(d => ({
+      ...d,
+      days: d.days.map(day =>
         day.id === dayId
-          ? {
-              ...day,
-              items: day.items.map((it) =>
-                it.id === itemId
-                  ? {
-                      ...it,
-                      [field]:
-                        field === "sets" || field === "reps"
-                          ? Math.max(1, Math.min(1000, parseInt(value || "0", 10) || 1))
-                          : value,
-                    }
-                  : it
-              ),
-            }
+          ? { ...day, items: day.items.filter(i => i.id !== itemId) }
           : day
       )
-    );
+    }));
   };
 
-  const moveDraftItem = (dayId, itemId, direction) => {
-    setDays((d) =>
-      d.map((day) => {
+  const updateExercise = (dayId, itemId, field, value) => {
+    setDraft(d => ({
+      ...d,
+      days: d.days.map(day =>
+        day.id === dayId
+          ? {
+            ...day,
+            items: day.items.map(item =>
+              item.id === itemId
+                ? { ...item, [field]: field === 'sets' || field === 'reps' ? parseInt(value) || 0 : value }
+                : item
+            )
+          }
+          : day
+      )
+    }));
+  };
+
+  const moveExercise = (dayId, itemId, dir) => {
+    setDraft(d => ({
+      ...d,
+      days: d.days.map(day => {
         if (day.id !== dayId) return day;
-        const idx = day.items.findIndex((it) => it.id === itemId);
-        if (idx < 0) return day;
-        const next = day.items.slice();
-        const swapWith = direction === "up" ? idx - 1 : idx + 1;
-        if (swapWith < 0 || swapWith >= next.length) return day;
-        const tmp = next[idx];
-        next[idx] = next[swapWith];
-        next[swapWith] = tmp;
-        return { ...day, items: next };
+        const idx = day.items.findIndex(i => i.id === itemId);
+        if (idx === -1) return day;
+        const newItems = [...day.items];
+        const swapIdx = dir === 'up' ? idx - 1 : idx + 1;
+        if (swapIdx < 0 || swapIdx >= newItems.length) return day;
+        [newItems[idx], newItems[swapIdx]] = [newItems[swapIdx], newItems[idx]];
+        return { ...day, items: newItems };
       })
-    );
+    }));
   };
 
-  const deleteDraftItem = (dayId, itemId) => {
-    setDays((d) =>
-      d.map((day) =>
-        day.id === dayId ? { ...day, items: day.items.filter((it) => it.id !== itemId) } : day
-      )
-    );
+  const handleSave = () => {
+    if (!draft.name.trim()) return alert("Program name is required");
+    onSave({ ...draft, updatedAt: new Date().toISOString() });
   };
-
-  const resetDraft = () => {
-    setName("");
-    setStartDate("");
-    setDays([{ id: genId(), name: "Day 1", items: [] }]);
-  };
-
-  const saveProgram = () => {
-    if (!name.trim()) {
-      alert("Please enter a program name.");
-      return;
-    }
-    if (!startDate) {
-      alert("Please choose a start date.");
-      return;
-    }
-    if (days.length === 0) {
-      alert("Add at least one day.");
-      return;
-    }
-    const newProgram = {
-      id: genId(),
-      name: name.trim(),
-      startDate,
-      days,
-      updatedAt: new Date().toISOString(),
-    };
-    setDb({
-      ...db,
-      programs: [...(db.programs || []), newProgram],
-    });
-    resetDraft();
-  };
-
-  // ---------- Saved programs: set active / delete / edit ----------
-  const setActiveProgram = (programId) => {
-    setDb({ ...db, activeProgramId: programId });
-  };
-
-  const deleteSavedProgram = (programId) => {
-    if (!confirm("Delete this program? This cannot be undone.")) return;
-    const nextPrograms = (db.programs || []).filter((p) => p.id !== programId);
-    const nextActive =
-      db.activeProgramId === programId ? (nextPrograms[0]?.id ?? null) : db.activeProgramId;
-    setDb({ ...db, programs: nextPrograms, activeProgramId: nextActive });
-  };
-
-  const deleteSavedDay = (programId, dayId) => {
-    setDb({
-      ...db,
-      programs: (db.programs || []).map((p) =>
-        p.id !== programId ? p : { ...p, days: p.days.filter((d) => d.id !== dayId), updatedAt: new Date().toISOString() }
-      ),
-    });
-  };
-
-  const deleteSavedItem = (programId, dayId, itemId) => {
-    setDb({
-      ...db,
-      programs: (db.programs || []).map((p) =>
-        p.id !== programId
-          ? p
-          : {
-              ...p,
-              days: p.days.map((d) =>
-                d.id !== dayId ? d : { ...d, items: d.items.filter((it) => it.id !== itemId) }
-              ),
-              updatedAt: new Date().toISOString(),
-            }
-      ),
-    });
-  };
-
-  const addExerciseToSavedDay = (programId, dayId, exerciseId) => {
-    const ex = (db.exercises || []).find((e) => e.id === exerciseId);
-    if (!ex) return;
-    setDb({
-      ...db,
-      programs: (db.programs || []).map((p) =>
-        p.id !== programId
-          ? p
-          : {
-              ...p,
-              days: p.days.map((d) =>
-                d.id !== dayId
-                  ? d
-                  : {
-                      ...d,
-                      items: [
-                        ...d.items,
-                        { id: genId(), exerciseId: ex.id, name: ex.name, sets: 3, reps: 10 },
-                      ],
-                    }
-              ),
-              updatedAt: new Date().toISOString(),
-            }
-      ),
-    });
-  };
-
-  const updateSavedItemField = (programId, dayId, itemId, field, value) => {
-    setDb({
-      ...db,
-      programs: (db.programs || []).map((p) =>
-        p.id !== programId
-          ? p
-          : {
-              ...p,
-              days: p.days.map((d) =>
-                d.id !== dayId
-                  ? d
-                  : {
-                      ...d,
-                      items: d.items.map((it) =>
-                        it.id !== itemId
-                          ? it
-                          : {
-                              ...it,
-                              [field]:
-                                field === "sets" || field === "reps"
-                                  ? Math.max(
-                                      1,
-                                      Math.min(1000, parseInt(value || "0", 10) || 1)
-                                    )
-                                  : value,
-                            }
-                      ),
-                    }
-              ),
-              updatedAt: new Date().toISOString(),
-            }
-      ),
-    });
-  };
-
-  const moveSavedItem = (programId, dayId, itemId, direction) => {
-    setDb({
-      ...db,
-      programs: (db.programs || []).map((p) => {
-        if (p.id !== programId) return p;
-        return {
-          ...p,
-          days: p.days.map((d) => {
-            if (d.id !== dayId) return d;
-            const idx = d.items.findIndex((it) => it.id === itemId);
-            if (idx < 0) return d;
-            const next = d.items.slice();
-            const swapWith = direction === "up" ? idx - 1 : idx + 1;
-            if (swapWith < 0 || swapWith >= next.length) return d;
-            const tmp = next[idx];
-            next[idx] = next[swapWith];
-            next[swapWith] = tmp;
-            return { ...d, items: next };
-          }),
-          updatedAt: new Date().toISOString(),
-        };
-      }),
-    });
-  };
-
-  // Simple inline editing for saved program: rename & change start date
-  const updateSavedProgramField = (programId, field, value) => {
-    setDb({
-      ...db,
-      programs: (db.programs || []).map((p) =>
-        p.id !== programId ? p : { ...p, [field]: value, updatedAt: new Date().toISOString() }
-      ),
-    });
-  };
-
-  const savedPrograms = db.programs || [];
-  const activeProgramId = db.activeProgramId || null;
 
   return (
     <div className="space-y-6">
-      {/* ---------------- Draft Builder ---------------- */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Create a Program</h2>
-
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
-          placeholder="Program name (e.g., 5x5 Strength)"
-        />
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="space-y-1 sm:col-span-1">
-            <label className="text-sm text-zinc-300">Start date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full p-2 rounded bg-zinc-900 text-zinc-100"
-            />
-          </div>
-        </div>
-
-        {/* Draft Days */}
-        <div className="space-y-3">
-          {days.map((day) => (
-            <div key={day.id} className="rounded border border-zinc-700 p-3 space-y-3">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 justify-between">
-                <div className="flex items-center gap-2 w-full">
-                  <input
-                    value={day.name}
-                    onChange={(e) => renameDay(day.id, e.target.value)}
-                    className="flex-1 p-2 rounded bg-zinc-900 text-zinc-100"
-                  />
-                  <button
-                    onClick={() => deleteDay(day.id)}
-                    className="px-3 py-2 rounded bg-red-600 text-white"
-                    title="Delete this day"
-                  >
-                    Delete Day
-                  </button>
-                </div>
-              </div>
-
-              {/* Add exercise to this draft day */}
-              <div className="flex flex-col sm:flex-row gap-2">
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v) {
-                      addExerciseToDraftDay(day.id, v);
-                      e.target.value = "";
-                    }
-                  }}
-                  className="p-2 rounded bg-zinc-900 text-zinc-100"
-                >
-                  <option value="" disabled>
-                    + Add exercise
-                  </option>
-                  {exercisesSorted.map((ex) => (
-                    <option key={ex.id} value={ex.id}>
-                      {ex.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Items for this draft day */}
-              <div className="space-y-2">
-                {day.items.length === 0 && (
-                  <div className="text-sm text-zinc-400">No exercises yet.</div>
-                )}
-                {day.items.map((it, iIdx) => (
-                  <div
-                    key={it.id}
-                    className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-center"
-                  >
-                    <div className="sm:col-span-2">
-                      <div className="text-zinc-100">
-                        {iIdx + 1}. {it.name}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-zinc-300">Sets</label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={it.sets}
-                        onChange={(e) =>
-                          updateDraftItemField(day.id, it.id, "sets", e.target.value)
-                        }
-                        className="w-20 p-2 rounded bg-zinc-900 text-zinc-100"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-zinc-300">Reps</label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={it.reps}
-                        onChange={(e) =>
-                          updateDraftItemField(day.id, it.id, "reps", e.target.value)
-                        }
-                        className="w-20 p-2 rounded bg-zinc-900 text-zinc-100"
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => moveDraftItem(day.id, it.id, "up")}
-                        className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
-                        title="Move up"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        onClick={() => moveDraftItem(day.id, it.id, "down")}
-                        className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
-                        title="Move down"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        onClick={() => deleteDraftItem(day.id, it.id)}
-                        className="px-3 py-1.5 rounded bg-zinc-800 text-zinc-200 text-sm"
-                        title="Remove exercise from this day"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-
-          <div className="flex gap-2">
-            <button onClick={addDay} className="px-3 py-2 rounded bg-zinc-800 text-zinc-200">
-              + Add Day
-            </button>
-            <button onClick={saveProgram} className="px-4 py-2 rounded bg-blue-600 text-white">
-              Save Program
-            </button>
-          </div>
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+        <Button variant="ghost" onClick={onCancel} className="text-zinc-400 hover:text-white">
+          ← Back to Programs
+        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onCancel} className="border-zinc-700 text-white hover:bg-zinc-800">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white">
+            Save Changes
+          </Button>
         </div>
       </div>
 
-      {/* ---------------- Saved Programs (fully editable) ---------------- */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold">Saved Programs</h2>
-        {(db.programs || []).length === 0 && (
-          <div className="text-sm text-zinc-400">No programs yet.</div>
-        )}
+      {/* Meta Info */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label>Program Name</Label>
+          <Input
+            value={draft.name}
+            onChange={e => updateField('name', e.target.value)}
+            className="bg-zinc-900 border-zinc-700 text-white"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Start Date</Label>
+          <Input
+            type="date"
+            value={draft.startDate || ''}
+            onChange={e => updateField('startDate', e.target.value)}
+            className="bg-zinc-900 border-zinc-700 text-white"
+          />
+        </div>
+      </div>
 
-        {(db.programs || []).map((p) => {
-          const weeks = p.startDate ? weeksBetween(p.startDate) + 1 : null;
-          const isActive = p.id === db.activeProgramId;
+      <Separator className="bg-zinc-800" />
 
-          return (
-            <div key={p.id} className="rounded border border-zinc-700 p-3 space-y-3">
-              <div className="flex items-start sm:items-center justify-between gap-2">
-                <div className="flex-1">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                    <input
-                      value={p.name}
-                      onChange={(e) => updateSavedProgramField(p.id, "name", e.target.value)}
-                      className="p-2 rounded bg-zinc-900 text-zinc-100 w-full sm:w-72"
-                    />
-                    <div className="text-xs text-zinc-400">
-                      {p.startDate ? `Week ${weeks}` : "No start date"}
-                    </div>
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <label className="text-sm text-zinc-300">Start date</label>
-                    <input
-                      type="date"
-                      value={p.startDate || ""}
-                      onChange={(e) =>
-                        updateSavedProgramField(p.id, "startDate", e.target.value)
-                      }
-                      className="p-2 rounded bg-zinc-900 text-zinc-100"
-                    />
-                  </div>
-                </div>
+      {/* Days & Exercises */}
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-semibold text-white">Workout Days</h3>
+          <Button onClick={addDay} variant="outline" className="border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800">
+            + Add Day
+          </Button>
+        </div>
 
-                <div className="flex items-center gap-2">
-                  {!isActive ? (
-                    <button
-                      onClick={() => setActiveProgram(p.id)}
-                      className="px-3 py-2 rounded bg-blue-600 text-white"
-                    >
-                      Set Active
-                    </button>
-                  ) : (
-                    <span className="px-3 py-2 rounded bg-green-600 text-white text-sm">
-                      Active
-                    </span>
-                  )}
-                  <button
-                    onClick={() => deleteSavedProgram(p.id)}
-                    className="px-3 py-2 rounded bg-red-600 text-white"
+        <div className="space-y-4">
+          {(draft.days || []).map((day, idx) => (
+            <Card key={day.id} className="bg-zinc-900/50 border-zinc-800">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-4">
+                  <Input
+                    value={day.name}
+                    onChange={e => renameDay(day.id, e.target.value)}
+                    className="bg-transparent border-transparent hover:border-zinc-700 focus:border-blue-500 font-semibold text-lg max-w-xs p-0 px-2 h-auto"
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => removeDay(day.id)}
+                    className="text-red-400 hover:bg-red-900/20 hover:text-red-300"
                   >
-                    Delete Program
-                  </button>
+                    Remove Day
+                  </Button>
                 </div>
-              </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Exercise List */}
+                {day.items?.length === 0 && (
+                  <p className="text-sm text-zinc-500 italic">No exercises added yet.</p>
+                )}
 
-              {/* Editable days & exercises */}
-              <div className="space-y-2">
-                {p.days.map((d) => (
-                  <div key={d.id} className="rounded border border-zinc-700 p-2 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium">{d.name}</div>
-                      <button
-                        onClick={() => deleteSavedDay(p.id, d.id)}
-                        className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
-                      >
-                        Delete Day
-                      </button>
+                {day.items?.map((item, itemIdx) => (
+                  <div key={item.id} className="flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-zinc-900 p-3 rounded border border-zinc-800/50 group hover:border-zinc-700 transition-colors">
+                    <span className="text-zinc-500 w-6 font-mono text-sm">{itemIdx + 1}.</span>
+                    <span className="text-white flex-1 font-medium">{item.name}</span>
+
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-zinc-500">Sets</Label>
+                      <Input
+                        type="number"
+                        className="w-16 h-8 bg-zinc-950 border-zinc-800 text-center"
+                        value={item.sets}
+                        onChange={e => updateExercise(day.id, item.id, 'sets', e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-zinc-500">Reps</Label>
+                      <Input
+                        type="number"
+                        className="w-16 h-8 bg-zinc-950 border-zinc-800 text-center"
+                        value={item.reps}
+                        onChange={e => updateExercise(day.id, item.id, 'reps', e.target.value)}
+                      />
                     </div>
 
-                    {/* Add exercise to saved day */}
-                    <div className="flex gap-2">
-                      <select
-                        defaultValue=""
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v) {
-                            addExerciseToSavedDay(p.id, d.id, v);
-                            e.target.value = "";
-                          }
-                        }}
-                        className="p-2 rounded bg-zinc-900 text-zinc-100"
-                      >
-                        <option value="" disabled>
-                          + Add exercise
-                        </option>
-                        {exercisesSorted.map((ex) => (
-                          <option key={ex.id} value={ex.id}>
-                            {ex.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="mt-2 space-y-1 text-sm">
-                      {d.items.length === 0 && (
-                        <div className="text-zinc-400">No exercises.</div>
-                      )}
-                      {d.items.map((it, idx) => (
-                        <div
-                          key={it.id}
-                          className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-center bg-zinc-900 rounded px-2 py-2"
-                        >
-                          <div className="sm:col-span-2">
-                            {idx + 1}. {it.name}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <label className="text-sm text-zinc-300">Sets</label>
-                            <input
-                              type="number"
-                              min={1}
-                              value={it.sets}
-                              onChange={(e) =>
-                                updateSavedItemField(p.id, d.id, it.id, "sets", e.target.value)
-                              }
-                              className="w-20 p-2 rounded bg-zinc-800 text-zinc-100"
-                            />
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <label className="text-sm text-zinc-300">Reps</label>
-                            <input
-                              type="number"
-                              min={1}
-                              value={it.reps}
-                              onChange={(e) =>
-                                updateSavedItemField(p.id, d.id, it.id, "reps", e.target.value)
-                              }
-                              className="w-20 p-2 rounded bg-zinc-800 text-zinc-100"
-                            />
-                          </div>
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => moveSavedItem(p.id, d.id, it.id, "up")}
-                              className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
-                              title="Move up"
-                            >
-                              ↑
-                            </button>
-                            <button
-                              onClick={() => moveSavedItem(p.id, d.id, it.id, "down")}
-                              className="px-2 py-1 rounded bg-zinc-800 text-zinc-200 text-sm"
-                              title="Move down"
-                            >
-                              ↓
-                            </button>
-                            <button
-                              onClick={() => deleteSavedItem(p.id, d.id, it.id)}
-                              className="px-2 py-1 rounded bg-zinc-800 text-zinc-200"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => moveExercise(day.id, item.id, 'up')}>↑</Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => moveExercise(day.id, item.id, 'down')}>↓</Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-300" onClick={() => removeExercise(day.id, item.id)}>×</Button>
                     </div>
                   </div>
                 ))}
-              </div>
-            </div>
-          );
-        })}
+
+                {/* Add Exercise Control */}
+                <div className="pt-2">
+                  <select
+                    className="w-full p-2 rounded bg-zinc-950 border border-zinc-800 text-zinc-300 text-sm focus:border-blue-500 outline-none cursor-pointer hover:bg-zinc-900"
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        addExercise(day.id, e.target.value);
+                        e.target.value = "";
+                      }
+                    }}
+                    defaultValue=""
+                  >
+                    <option value="" disabled>+ Add Exercise to {day.name}</option>
+                    {exercises.map(ex => (
+                      <option key={ex.id} value={ex.id}>{ex.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     </div>
+  );
+}
+
+export default function ProgramTab({ db, setDb }) {
+  const [view, setView] = useState('list'); // 'list', 'edit', 'create'
+  const [selectedProgramId, setSelectedProgramId] = useState(null);
+
+  const programs = useMemo(() => db.programs || [], [db.programs]);
+  const exercises = useMemo(() => (db.exercises || []).slice().sort((a, b) => a.name.localeCompare(b.name)), [db.exercises]);
+
+  const handleCreate = () => {
+    const newId = genId();
+    const newProgram = {
+      id: newId,
+      name: "New Program",
+      startDate: new Date().toISOString().slice(0, 10),
+      days: [{ id: genId(), name: "Day 1", items: [] }],
+      updatedAt: new Date().toISOString()
+    };
+    // Don't save to DB yet, just pass to editor
+    setDb({ ...db, programs: [...programs, newProgram] });
+    setSelectedProgramId(newId);
+    setView('edit');
+  };
+
+  const handleSaveProgram = (updatedProgram) => {
+    setDb({
+      ...db,
+      programs: programs.map(p => p.id === updatedProgram.id ? updatedProgram : p)
+    });
+    setView('list');
+    setSelectedProgramId(null);
+  };
+
+  const handleDeleteProgram = (id) => {
+    if (!confirm("Are you sure? This cannot be undone.")) return;
+    setDb({
+      ...db,
+      programs: programs.filter(p => p.id !== id),
+      activeProgramId: db.activeProgramId === id ? null : db.activeProgramId
+    });
+  };
+
+  const handleSetActive = (id) => {
+    if (db.activeProgramId === id) return;
+
+    // 1. Find currently active program and set its endDate to now.
+    const now = new Date().toISOString().slice(0, 10);
+    const updatedPrograms = programs.map(p => {
+      // If this was the PREVIOUSLY active program, set its endDate
+      if (p.id === db.activeProgramId) {
+        return { ...p, endDate: now, updatedAt: new Date().toISOString() };
+      }
+      // If this is the NEWLY active program, clear any old endDate (restart)
+      if (p.id === id) {
+        const { endDate, ...rest } = p; // remove endDate
+        return { ...rest, updatedAt: new Date().toISOString() };
+      }
+      return p;
+    });
+
+    setDb({ ...db, programs: updatedPrograms, activeProgramId: id });
+  };
+
+  if (view === 'edit' && selectedProgramId) {
+    const programToEdit = programs.find(p => p.id === selectedProgramId);
+    if (!programToEdit) {
+      setView('list'); // Fallback if not found
+      return null;
+    }
+    return (
+      <ProgramEditor
+        program={programToEdit}
+        exercises={exercises}
+        onSave={handleSaveProgram}
+        onCancel={() => {
+          setView('list');
+          setSelectedProgramId(null);
+        }}
+      />
+    );
+  }
+
+  return (
+    <ProgramList
+      programs={programs}
+      activeProgramId={db.activeProgramId}
+      onSelect={(id) => {
+        setSelectedProgramId(id);
+        setView('edit');
+      }}
+      onCreate={handleCreate}
+      onSetActive={handleSetActive}
+      onDelete={handleDeleteProgram}
+    />
   );
 }
