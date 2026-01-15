@@ -102,75 +102,85 @@ export default function ExercisesTab({ db, setDb }) {
         </div>
 
         {/* List of exercises */}
-        {(db.exercises || []).length === 0 ? (
-          <div className="text-center py-10 text-zinc-500 border border-dashed border-zinc-800 rounded-xl">
-            No exercises yet. Add one above!
-          </div>
-        ) : (
-          <ul className="space-y-2">
-            {db.exercises.map((ex) => (
-              <li
-                key={ex.id}
-                className="flex justify-between items-center bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl hover:border-zinc-700 transition-colors"
-              >
-                {editingId === ex.id ? (
-                  <div className="flex flex-col sm:flex-row gap-2 flex-1">
-                    <input
-                      type="text"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      className="flex-1 px-3 py-2 rounded bg-zinc-950 text-white border border-zinc-800"
-                    />
-                    <select
-                      value={editCategory}
-                      onChange={(e) => setEditCategory(e.target.value)}
-                      className="px-3 py-2 rounded bg-zinc-950 text-zinc-300 border border-zinc-800"
-                    >
-                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => saveEdit(ex.id)}
-                        className="bg-green-600 text-white px-3 py-2 rounded text-sm font-medium"
+        {(() => {
+          const sortedExercises = [...(db.exercises || [])].sort((a, b) =>
+            a.name.localeCompare(b.name)
+          );
+
+          if (sortedExercises.length === 0) {
+            return (
+              <div className="text-center py-10 text-zinc-500 border border-dashed border-zinc-800 rounded-xl">
+                No exercises yet. Add one above!
+              </div>
+            );
+          }
+
+          return (
+            <ul className="space-y-2">
+              {sortedExercises.map((ex) => (
+                <li
+                  key={ex.id}
+                  className="flex justify-between items-center bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl hover:border-zinc-700 transition-colors"
+                >
+                  {editingId === ex.id ? (
+                    <div className="flex flex-col sm:flex-row gap-2 flex-1">
+                      <input
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="flex-1 px-3 py-2 rounded bg-zinc-950 text-white border border-zinc-800"
+                      />
+                      <select
+                        value={editCategory}
+                        onChange={(e) => setEditCategory(e.target.value)}
+                        className="px-3 py-2 rounded bg-zinc-950 text-zinc-300 border border-zinc-800"
                       >
-                        Save
-                      </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="bg-zinc-700 text-white px-3 py-2 rounded text-sm"
-                      >
-                        Cancel
-                      </button>
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveEdit(ex.id)}
+                          className="bg-green-600 text-white px-3 py-2 rounded text-sm font-medium"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="bg-zinc-700 text-white px-3 py-2 rounded text-sm"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <span className="text-white font-medium">{ex.name}</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
-                        {ex.category || "Other"}
-                      </span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => startEdit(ex)}
-                        className="text-zinc-400 hover:text-white text-sm px-2 py-1"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => deleteExercise(ex.id)}
-                        className="text-red-400 hover:text-red-300 text-sm px-2 py-1"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <span className="text-white font-medium">{ex.name}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
+                          {ex.category || "Other"}
+                        </span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => startEdit(ex)}
+                          className="text-zinc-400 hover:text-white text-sm px-2 py-1"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteExercise(ex.id)}
+                          className="text-red-400 hover:text-red-300 text-sm px-2 py-1"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
       </div>
     </div>
   );
