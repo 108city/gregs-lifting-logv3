@@ -66,7 +66,7 @@ export default function App() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
       console.log("Saved to localStorage");
-    } catch {}
+    } catch { }
 
     if (!hasHydratedFromCloud.current) {
       console.log("Skipping cloud sync - not hydrated yet");
@@ -98,7 +98,7 @@ export default function App() {
         </TabsContent>
 
         <TabsContent value="progress">
-          <ProgressTab db={db} />
+          <ProgressTab db={db} setDb={setDb} />
         </TabsContent>
 
         <TabsContent value="program">

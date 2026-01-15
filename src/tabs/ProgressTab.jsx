@@ -9,6 +9,10 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+  Legend
 } from "recharts";
 import { supabase } from "../supabaseClient.js";
 
@@ -102,14 +106,13 @@ function dayNumberLabel(w, programs) {
   return idx >= 0 ? `Day ${idx + 1}` : "Day ?";
 }
 const ratingBtnClasses = (active, color) =>
-  `px-2 py-1 rounded text-sm ${
-    active
-      ? color === "green"
-        ? "bg-green-600 text-white"
-        : color === "orange"
+  `px-2 py-1 rounded text-sm ${active
+    ? color === "green"
+      ? "bg-green-600 text-white"
+      : color === "orange"
         ? "bg-orange-500 text-black"
         : "bg-red-600 text-white"
-      : "bg-zinc-800 text-zinc-200"
+    : "bg-zinc-800 text-zinc-200"
   }`;
 
 /* ─────────── Safe Portal ─────────── */
@@ -348,80 +351,52 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
   );
 }
 
-/* ─────────── Last 5 (cloud) ─────────── */
+// Helper to ensure unique IDs
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+
+/* ─────────── Last 5 (Local DB) ─────────── */
 function RecentWorkoutsCloud({ programs, setDb, db }) {
-  const [items, setItems] = useState(null);
+  // Use db.log directly instead of fetching separately
+  const items = useMemo(() => {
+    const log = db?.log || [];
+    const cleaned = (Array.isArray(log) ? log : []).filter(isMeaningfulWorkout);
+    const sorted = [...cleaned].sort(byNewest);
+    return sorted.slice(0, 5);
+  }, [db?.log]);
+
   const [selected, setSelected] = useState(null);
 
-  useEffect(() => {
-    let alive = true;
+  // When clicking View, ensure the item has an ID to make it robustly addressable
+  const handleView = (w) => {
+    if (!w.id) {
+      console.log("Assigning ID to legacy workout for editing");
+      const newId = genId();
+      const withId = { ...w, id: newId };
 
-    async function fetchCloudLog() {
-      try {
-        const m = await import("../syncService.js");
-        if (m && typeof m.loadFromCloud === "function") {
-          const cloud = await m.loadFromCloud();
-          return Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
-        }
-      } catch {}
-      // fallback: prefer device row if it exists, else main
-      const { data: dev } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "gregs-device")
-        .maybeSingle();
-      if (Array.isArray(dev?.data?.log)) return dev.data.log;
-
-      const { data: main } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "main")
-        .maybeSingle();
-      return Array.isArray(main?.data?.log) ? main.data.log : [];
+      // Update DB immediately
+      const updatedLog = (db.log || []).map(item => item === w ? withId : item);
+      setDb({ ...db, log: updatedLog });
+      setSelected(withId);
+    } else {
+      setSelected(w);
     }
-
-    (async () => {
-      try {
-        const log = await fetchCloudLog();
-        if (!alive) return;
-        const cleaned = (Array.isArray(log) ? log : []).filter(isMeaningfulWorkout);
-        const sorted = [...cleaned].sort(byNewest);
-        setItems(sorted.slice(0, 5));
-      } catch (e) {
-        console.error("[RecentWorkoutsCloud] Load failed:", e?.message || e);
-        setItems([]);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const handleSaveWorkout = (updatedWorkout) => {
-    const updatedLog = (db.log || []).map((w) => (w.id === updatedWorkout.id ? updatedWorkout : w));
-    setDb({ ...db, log: updatedLog });
-
-    setItems((prevItems) => prevItems.map((w) => (w.id === updatedWorkout.id ? updatedWorkout : w)));
   };
 
-  // 🔴 Accept FULL workout object; normalize key once
-  const handleDeleteWorkout = (targetWorkout) => {
-    const normKeyFromWorkout = (w) => {
-      if (!w) return "nil";
-      if (w.id != null) return `id:${String(w.id)}`;
-      const d = toDate(w?.date) || toDate(w?.endedAt) || toDate(w?.startedAt);
-      return `ts:${d ? d.getTime() : 0}`;
-    };
-    const targetKey = normKeyFromWorkout(targetWorkout);
-    console.log("[RecentWorkoutsCloud] delete target =", targetKey);
-
-    // Remove from local db
-    const updatedLog = (db.log || []).filter((w) => normKeyFromWorkout(w) !== targetKey);
+  const handleSaveWorkout = (updatedWorkout) => {
+    // With ID guaranteed, we can just match by ID
+    const updatedLog = (db.log || []).map((w) => {
+      if (w.id === updatedWorkout.id) return updatedWorkout;
+      return w;
+    });
     setDb({ ...db, log: updatedLog });
+    setSelected(null);
+  };
 
-    // Remove from visible list
-    setItems((prevItems) => prevItems.filter((w) => normKeyFromWorkout(w) !== targetKey));
+  const handleDeleteWorkout = (targetWorkout) => {
+    // With ID guaranteed, we can just filter by ID
+    const updatedLog = (db.log || []).filter((w) => w.id !== targetWorkout.id);
+    setDb({ ...db, log: updatedLog });
+    setSelected(null);
   };
 
   if (!items || items.length === 0) return null;
@@ -453,7 +428,7 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelected(w)}
+                    onClick={() => handleView(w)}
                     className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
                   >
                     View & Edit
@@ -524,9 +499,8 @@ function TwoWeekCalendar({ workouts }) {
           return (
             <div
               key={`r1-${i}`}
-              className={`${cellBase} ${
-                didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
-              }`}
+              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
+                }`}
               title={key}
             >
               <div className="text-2xl mb-1 leading-none">{didWork ? "💪" : "😴"}</div>
@@ -546,9 +520,8 @@ function TwoWeekCalendar({ workouts }) {
           return (
             <div
               key={`r2-${i}`}
-              className={`${cellBase} ${
-                didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
-              }`}
+              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
+                }`}
               title={key}
             >
               <div className="text-2xl mb-1 leading-none">{didWork ? "💪" : "😴"}</div>
@@ -639,8 +612,98 @@ export default function ProgressTab({ db, setDb }) {
     return { recent7: last7, recent30: last30 };
   }, [filteredLog]);
 
+  // Muscle Volume Calculation
+  const muscleData = useMemo(() => {
+    const counts = {};
+    const exercises = db?.exercises || [];
+
+    // Map exercise name to category
+    const catMap = new Map();
+    exercises.forEach(ex => catMap.set(ex.name, ex.category || "Other"));
+
+    for (const w of filteredLog) {
+      const exs = getExercisesFromWorkout(w);
+      for (const ex of exs) {
+        // only count if meaningful
+        const sets = getSets(ex).filter(hasRealSet).length;
+        if (sets > 0) {
+          // Find category
+          let cat = catMap.get(ex.name) || "Other";
+          // auto-detect if missing from map (fallback)
+          if (cat === "Other") {
+            const lower = ex.name.toLowerCase();
+            if (lower.includes("bench") || lower.includes("fly") || lower.includes("press")) cat = "Chest/Push";
+            else if (lower.includes("row") || lower.includes("pull") || lower.includes("dead")) cat = "Back/Pull";
+            else if (lower.includes("squat") || lower.includes("leg") || lower.includes("calf")) cat = "Legs";
+            else if (lower.includes("curl") || lower.includes("tricep")) cat = "Arms";
+          }
+          counts[cat] = (counts[cat] || 0) + sets;
+        }
+      }
+    }
+
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [filteredLog, db?.exercises]);
+
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1', '#64748b'];
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 7 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent7}</p>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500">Workouts in Last 30 Days</p>
+          <p className="mt-1 text-2xl font-semibold">{recent30}</p>
+        </div>
+      </div>
+
+      {/* Muscle Split Chart */}
+      {muscleData.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between">
+          <div className="w-full sm:w-1/2">
+            <h3 className="text-base font-semibold mb-1">Muscle Group Split</h3>
+            <p className="text-xs text-gray-500 mb-4">Based on total sets logged</p>
+            <div className="space-y-2">
+              {muscleData.slice(0, 4).map((d, i) => (
+                <div key={d.name} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                    <span>{d.name}</span>
+                  </div>
+                  <span className="font-semibold">{d.value} sets</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="w-full sm:w-1/2 h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={muscleData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {muscleData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
       {/* TOP: Exercise selector + stats block */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -691,18 +754,6 @@ export default function ProgressTab({ db, setDb }) {
               <Line type="monotone" dataKey="weight" name="Session max" dot activeDot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-gray-500">Workouts in Last 7 Days</p>
-          <p className="mt-1 text-2xl font-semibold">{recent7}</p>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-gray-500">Workouts in Last 30 Days</p>
-          <p className="mt-1 text-2xl font-semibold">{recent30}</p>
         </div>
       </div>
 

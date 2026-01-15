@@ -1,5 +1,5 @@
-// src/tabs/LogTab.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import PlateCalculator from "@/components/PlateCalculator";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const genId = () =>
@@ -27,14 +27,13 @@ const weeksBetween = (startIso, endIso = todayIso()) => {
 };
 
 const ratingBtnClasses = (active, color) =>
-  `px-2 py-1 rounded text-sm ${
-    active
-      ? color === "green"
-        ? "bg-green-600 text-white"
-        : color === "orange"
+  `px-2 py-1 rounded text-sm ${active
+    ? color === "green"
+      ? "bg-green-600 text-white"
+      : color === "orange"
         ? "bg-orange-500 text-black"
         : "bg-red-600 text-white"
-      : "bg-zinc-800 text-zinc-200"
+    : "bg-zinc-800 text-zinc-200"
   }`;
 
 /**
@@ -63,7 +62,7 @@ function seedWorking(db, program, day, date) {
           reps: String(clampInt(it.reps ?? 1, 1, 100)),
           kg:
             prevEntry?.sets?.[i]?.kg !== undefined &&
-            prevEntry?.sets?.[i]?.kg !== null
+              prevEntry?.sets?.[i]?.kg !== null
               ? String(prevEntry.sets[i].kg)
               : "",
         })
@@ -124,9 +123,9 @@ export default function LogTab({ db, setDb }) {
       entries: w.entries.map((e) =>
         e.id === entryId
           ? {
-              ...e,
-              sets: e.sets.map((s, i) => (i === setIdx ? { ...s, ...patch } : s)),
-            }
+            ...e,
+            sets: e.sets.map((s, i) => (i === setIdx ? { ...s, ...patch } : s)),
+          }
           : e
       ),
     }));
@@ -140,7 +139,8 @@ export default function LogTab({ db, setDb }) {
     }));
 
   // popup state
-  const [showPopup, setShowPopup] = useState(false);
+  const [showPopup, setShowPopup] = useState(null); // null | { type: 'saved' } | { type: 'pr', items: [] }
+  const [showCalc, setShowCalc] = useState(false);
 
   const saveSession = async () => {
     if (!activeProgram || !day) return;
@@ -174,7 +174,7 @@ export default function LogTab({ db, setDb }) {
         : [...(db.log || []), normalized];
 
     const updatedDb = { ...db, log: nextLog };
-    
+
     // Update local state first
     setDb(updatedDb);
 
@@ -192,14 +192,44 @@ export default function LogTab({ db, setDb }) {
         details: error?.details,
         hint: error?.hint
       });
-      
+
       // Show user-visible error but don't block the UI
       alert(`Workout saved locally but cloud sync failed: ${error?.message || 'Unknown error'}. Please check your internet connection.`);
     }
 
+    // Check for PRs
+    const prs = [];
+    normalized.entries.forEach(entry => {
+      const exerciseId = entry.exerciseId;
+      const currentMax = entry.sets.reduce((max, s) => Math.max(max, Number(s.kg || 0)), 0);
+
+      if (currentMax > 0) {
+        // Find previous max across ALL logs
+        const previousMax = (db.log || []).reduce((max, log) => {
+          // Ignore current session if it was already saved (updating same day)
+          if (log.id === normalized.id) return max;
+
+          const exEntry = (log.entries || []).find(e => e.exerciseId === exerciseId);
+          if (exEntry) {
+            const sessionMax = exEntry.sets.reduce((m, s) => Math.max(m, Number(s.kg || 0) || 0), 0);
+            return Math.max(max, sessionMax);
+          }
+          return max;
+        }, 0);
+
+        if (currentMax > previousMax && previousMax > 0) {
+          prs.push(`${entry.exerciseName} (${currentMax}kg)`);
+        }
+      }
+    });
+
     // trigger popup
-    setShowPopup(true);
-    setTimeout(() => setShowPopup(false), 3000);
+    if (prs.length > 0) {
+      setShowPopup({ type: 'pr', items: prs });
+    } else {
+      setShowPopup({ type: 'saved' });
+    }
+    setTimeout(() => setShowPopup(null), 4000);
   };
 
   // ---- UI ----
@@ -259,15 +289,29 @@ export default function LogTab({ db, setDb }) {
               }
             `}
           </style>
-          <div className="fixed inset-0 flex items-center justify-center z-[9999] pointer-events-none">
-            <div className="bg-black/80 text-white px-8 py-6 rounded-2xl text-xl font-semibold shadow-2xl transform transition-all duration-300 ease-out popup-bounce">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl celebrate-emoji">🎉</span>
-                <span>Workout Saved!</span>
-                <span className="text-2xl flex-emoji">💪</span>
+          {showPopup && (
+            <div className="fixed inset-0 flex items-center justify-center z-[9999] pointer-events-none">
+              <div className={`
+                    px-8 py-6 rounded-2xl text-xl font-semibold shadow-2xl transform transition-all duration-300 ease-out popup-bounce
+                    ${showPopup.type === 'pr' ? 'bg-gradient-to-r from-yellow-500 to-amber-600 text-white border-2 border-yellow-200' : 'bg-black/80 text-white'}
+                `}>
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl celebrate-emoji">{showPopup.type === 'pr' ? '🏆' : '🎉'}</span>
+                  <div className="text-center">
+                    <div className="text-2xl">{showPopup.type === 'pr' ? 'New PR!' : 'Workout Saved!'}</div>
+                    {showPopup.type === 'pr' && (
+                      <div className="text-sm font-normal text-yellow-100 mt-1 flex flex-col gap-0.5">
+                        {showPopup.items.map((item, i) => (
+                          <div key={i}>{item}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-3xl flex-emoji">{showPopup.type === 'pr' ? '🔥' : '💪'}</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </>
       )}
 
@@ -278,7 +322,15 @@ export default function LogTab({ db, setDb }) {
           Started {activeProgram.startDate || "—"} · Week{" "}
           {weeksBetween(activeProgram.startDate) + 1}
         </div>
+        <button
+          onClick={() => setShowCalc(true)}
+          className="ml-auto text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg border border-zinc-700 transition-colors flex items-center gap-2"
+        >
+          <span>🧮</span> Plate Calc
+        </button>
       </div>
+
+      {showCalc && <PlateCalculator onClose={() => setShowCalc(false)} />}
 
       {/* Date + Day pickers */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
