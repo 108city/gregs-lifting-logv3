@@ -63,9 +63,6 @@ export default function App() {
         console.log("Hydration complete");
       }
     })();
-    return () => {
-      mounted = false;
-    };
   }, []);
 
   // 2) Sync every state change

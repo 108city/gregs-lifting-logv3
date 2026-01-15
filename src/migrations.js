@@ -262,13 +262,85 @@ export function runMigrations(db) {
                     }
                 }
             });
-
             newDb.exercises = Array.from(seen.values());
             applied.add(V4_KEY);
             newDb.migrationsApplied = Array.from(applied);
             changed = true;
-            console.log(`[Migrations] ${V4_KEY} complete. Exercises reduced to ${newDb.exercises.length}`);
         }
+    }
+
+    // --- MIGRATION: Robust Merging (v5) ---
+    const V5_KEY = "merge-duplicates-v5";
+    if (!applied.has(V5_KEY)) {
+        console.log(`[Migrations] Running ${V5_KEY}...`);
+
+        const NORM_MAP_V5 = {
+            "face pull": "Face Pull",
+            "face pulls": "Face Pull",
+            "lateral raise": "Lateral Raises",
+            "lateral raises": "Lateral Raises",
+            "db benchpress": "Bench Press",
+            "db bench press": "Bench Press",
+            "bench press": "Bench Press",
+            "back squat": "Squat",
+            "squat": "Squat",
+            "low row": "Row",
+            "row": "Row"
+        };
+        const CAT_MAP_V5 = {
+            "Face Pull": "Back",
+            "Lateral Raises": "Shoulders",
+            "Bench Press": "Chest",
+            "Squat": "Legs",
+            "Row": "Back"
+        };
+
+        // 1. Update Logs
+        if (Array.isArray(newDb.log)) {
+            newDb.log = newDb.log.map(workout => {
+                let workoutChanged = false;
+                const newEntries = (workout.entries || []).map(entry => {
+                    const lower = (entry.exerciseName || "").toLowerCase().trim();
+                    const targetName = NORM_MAP_V5[lower];
+                    if (targetName && entry.exerciseName !== targetName) {
+                        workoutChanged = true;
+                        return { ...entry, exerciseName: targetName };
+                    }
+                    return entry;
+                });
+                return workoutChanged ? { ...workout, entries: newEntries } : workout;
+            });
+        }
+
+        // 2. Standardize Exercises List
+        if (Array.isArray(newDb.exercises)) {
+            // Delete duplicates (keep only target names)
+            newDb.exercises = newDb.exercises.filter(ex => {
+                const lower = (ex.name || "").toLowerCase().trim();
+                const targetName = NORM_MAP_V5[lower];
+                if (targetName && ex.name !== targetName) return false;
+                return true;
+            });
+
+            // Set categories
+            newDb.exercises = newDb.exercises.map(ex => {
+                const cat = CAT_MAP_V5[ex.name];
+                return cat ? { ...ex, category: cat } : ex;
+            });
+
+            // Ensure targets exist
+            const existing = new Set(newDb.exercises.map(e => e.name));
+            Object.entries(CAT_MAP_V5).forEach(([name, cat]) => {
+                if (!existing.has(name)) {
+                    newDb.exercises.push({ id: Date.now() + Math.random(), name, category: cat });
+                }
+            });
+        }
+
+        applied.add(V5_KEY);
+        newDb.migrationsApplied = Array.from(applied);
+        changed = true;
+        console.log(`[Migrations] ${V5_KEY} complete.`);
     }
 
     return changed ? newDb : null;

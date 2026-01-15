@@ -648,14 +648,22 @@ export default function ProgressTab({ db, setDb }) {
           if (!counts[cat]) counts[cat] = { total: 0, exercises: {} };
           counts[cat].total += sets;
 
-          // CONSOLIDATE TYPOS (UI Level)
-          let displayName = ex.name;
-          const lowers = displayName.toLowerCase().trim();
-          if (lowers === "face pulls") displayName = "Face Pull";
-          if (lowers === "lateral raise") displayName = "Lateral Raises";
-          if (lowers === "db benchpress" || lowers === "db bench press") displayName = "Bench Press";
-          if (lowers === "back squat") displayName = "Squat";
-          if (lowers === "low row") displayName = "Row";
+          // CONSOLIDATE TYPOS (UI Level) - Safety net if migration didn't run or data is stale
+          const UI_MERGE = {
+            "face pulls": "Face Pull",
+            "lateral raise": "Lateral Raises",
+            "db benchpress": "Bench Press",
+            "db bench press": "Bench Press",
+            "back squat": "Squat",
+            "low row": "Row",
+            "row": "Row",
+            "face pull": "Face Pull",
+            "lateral raises": "Lateral Raises",
+            "bench press": "Bench Press",
+            "squat": "Squat"
+          };
+
+          let displayName = UI_MERGE[normalizedName] || ex.name;
 
           counts[cat].exercises[displayName] = (counts[cat].exercises[displayName] || 0) + sets;
         }
