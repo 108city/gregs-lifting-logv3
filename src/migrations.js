@@ -115,7 +115,7 @@ export function runMigrations(db) {
             newDb.log = newDb.log.map(workout => {
                 let workoutChanged = false;
                 const newEntries = (workout.entries || []).map(entry => {
-                    const lower = entry.exerciseName.toLowerCase().trim();
+                    const lower = (entry.exerciseName || "").toLowerCase().trim();
                     const rule = NORM_MAP[lower];
                     if (rule && entry.exerciseName !== rule.name) {
                         workoutChanged = true;
@@ -135,14 +135,14 @@ export function runMigrations(db) {
 
             // Filter out anything that matches our sources UNLESS it is the exact target name we want to keep
             newDb.exercises = newDb.exercises.filter(ex => {
-                const lower = ex.name.toLowerCase().trim();
+                const lower = (ex.name || "").toLowerCase().trim();
                 if (sourcesToDelete.has(lower) && !targets.has(ex.name)) return false;
                 return true;
             });
 
             // Update categories for targets
             newDb.exercises = newDb.exercises.map(ex => {
-                const lower = ex.name.toLowerCase().trim();
+                const lower = (ex.name || "").toLowerCase().trim();
                 const rule = NORM_MAP[lower];
                 if (rule && targets.has(ex.name)) {
                     return { ...ex, category: rule.cat };
@@ -186,7 +186,7 @@ export function runMigrations(db) {
             newDb.log = newDb.log.map(workout => {
                 let workoutChanged = false;
                 const newEntries = (workout.entries || []).map(entry => {
-                    const lower = entry.exerciseName.toLowerCase().trim();
+                    const lower = (entry.exerciseName || "").toLowerCase().trim();
                     const rule = NORM_MAP_V3[lower];
                     if (rule && entry.exerciseName !== rule.name) {
                         workoutChanged = true;
@@ -204,13 +204,13 @@ export function runMigrations(db) {
             const sourcesToDelete = new Set(["back squat", "squat", "low row", "row"]);
 
             newDb.exercises = newDb.exercises.filter(ex => {
-                const lower = ex.name.toLowerCase().trim();
+                const lower = (ex.name || "").toLowerCase().trim();
                 if (sourcesToDelete.has(lower) && !targets.has(ex.name)) return false;
                 return true;
             });
 
             newDb.exercises = newDb.exercises.map(ex => {
-                const lower = ex.name.toLowerCase().trim();
+                const lower = (ex.name || "").toLowerCase().trim();
                 const rule = NORM_MAP_V3[lower];
                 if (rule && targets.has(ex.name)) {
                     return { ...ex, category: rule.cat };
