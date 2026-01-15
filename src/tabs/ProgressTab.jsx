@@ -637,13 +637,20 @@ export default function ProgressTab({ db, setDb }) {
             else if (lower.includes("squat") || lower.includes("leg") || lower.includes("calf")) cat = "Legs";
             else if (lower.includes("curl") || lower.includes("tricep")) cat = "Arms";
           }
-          counts[cat] = (counts[cat] || 0) + sets;
+
+          if (!counts[cat]) counts[cat] = { total: 0, exercises: {} };
+          counts[cat].total += sets;
+          counts[cat].exercises[ex.name] = (counts[cat].exercises[ex.name] || 0) + sets;
         }
       }
     }
 
     return Object.entries(counts)
-      .map(([name, value]) => ({ name, value }))
+      .map(([name, data]) => ({
+        name,
+        value: data.total,
+        details: Object.entries(data.exercises).map(([exName, count]) => ({ exName, count })).sort((a, b) => b.count - a.count)
+      }))
       .sort((a, b) => b.value - a.value);
   }, [filteredLog, db?.exercises]);
 
@@ -665,41 +672,67 @@ export default function ProgressTab({ db, setDb }) {
 
       {/* Muscle Split Chart */}
       {muscleData.length > 0 && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between">
-          <div className="w-full sm:w-1/2">
-            <h3 className="text-base font-semibold mb-1">Muscle Group Split</h3>
-            <p className="text-xs text-gray-500 mb-4">Based on total sets logged</p>
-            <div className="space-y-2">
-              {muscleData.slice(0, 4).map((d, i) => (
-                <div key={d.name} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                    <span>{d.name}</span>
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between">
+            <div className="w-full sm:w-1/2">
+              <h3 className="text-base font-semibold mb-1">Muscle Group Split</h3>
+              <p className="text-xs text-gray-500 mb-4">Based on total sets logged</p>
+              <div className="space-y-2">
+                {muscleData.slice(0, 5).map((d, i) => (
+                  <div key={d.name} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                      <span>{d.name}</span>
+                    </div>
+                    <span className="font-semibold">{d.value} sets</span>
                   </div>
-                  <span className="font-semibold">{d.value} sets</span>
+                ))}
+              </div>
+            </div>
+            <div className="w-full sm:w-1/2 h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={muscleData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {muscleData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Category Breakdown Details */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <h3 className="text-base font-semibold mb-4">Category Breakdown</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {muscleData.map((cat, i) => (
+                <div key={cat.name} className="p-3 rounded-xl bg-gray-50 border border-gray-100">
+                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-200">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                    <span className="font-semibold text-sm">{cat.name}</span>
+                    <span className="text-xs text-gray-500 ml-auto">{cat.value} sets</span>
+                  </div>
+                  <div className="space-y-1 text-xs text-gray-600">
+                    {cat.details.map((ex, j) => (
+                      <div key={ex.exName} className="flex justify-between">
+                        <span className="truncate pr-2">{ex.exName}</span>
+                        <span className="font-medium">{ex.count}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-          <div className="w-full sm:w-1/2 h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={muscleData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {muscleData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
           </div>
         </div>
       )}

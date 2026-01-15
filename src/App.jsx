@@ -6,10 +6,13 @@ import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
 
+import { runMigrations } from "./migrations";
+
 const STORAGE_KEY = "gregs-lifting-log";
 
 export default function App() {
   const [db, setDb] = useState(() => {
+    // ... initial load ...
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       return raw
@@ -34,13 +37,25 @@ export default function App() {
         console.log("=== CLOUD LOAD ===");
         console.log("Cloud data:", cloud);
 
+        let mergedDb = db; // default to current state if nothing found
+
         if (cloud?.data && Object.keys(cloud.data).length) {
           console.log("Using cloud data");
-          setDb(cloud.data);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud.data));
+          mergedDb = cloud.data;
         } else {
           console.log("Using local data");
         }
+
+        // --- RUN MIGRATIONS ---
+        const migrated = runMigrations(mergedDb);
+        if (migrated) {
+          console.log("Migrations applied, updating state.");
+          mergedDb = migrated;
+        }
+
+        setDb(mergedDb);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedDb));
+
       } catch (e) {
         console.warn("Cloud load failed:", e.message);
       } finally {
