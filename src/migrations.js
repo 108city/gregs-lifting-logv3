@@ -235,5 +235,41 @@ export function runMigrations(db) {
         console.log(`[Migrations] ${V3_KEY} complete.`);
     }
 
+    // --- MIGRATION: Aggressive Deduplication (v4) ---
+    const V4_KEY = "exercise-dedupe-v4";
+    if (!applied.has(V4_KEY)) {
+        console.log(`[Migrations] Running ${V4_KEY}...`);
+
+        if (Array.isArray(newDb.exercises)) {
+            const seen = new Map(); // normalizedName -> fullExerciseObject
+            const deduplicated = [];
+
+            // Preferred names (targets we want to keep)
+            const targets = new Set(["Squat", "Row", "Face Pull", "Bench Press", "Lateral Raises"]);
+
+            newDb.exercises.forEach(ex => {
+                if (!ex.name) return;
+                const lower = ex.name.toLowerCase().trim();
+
+                if (!seen.has(lower)) {
+                    seen.set(lower, ex);
+                } else {
+                    // We already saw this name variation. Should we swap it?
+                    // If the current one is an exact target name and the seen one isn't, swap.
+                    const currentSeen = seen.get(lower);
+                    if (targets.has(ex.name) && !targets.has(currentSeen.name)) {
+                        seen.set(lower, ex);
+                    }
+                }
+            });
+
+            newDb.exercises = Array.from(seen.values());
+            applied.add(V4_KEY);
+            newDb.migrationsApplied = Array.from(applied);
+            changed = true;
+            console.log(`[Migrations] ${V4_KEY} complete. Exercises reduced to ${newDb.exercises.length}`);
+        }
+    }
+
     return changed ? newDb : null;
 }

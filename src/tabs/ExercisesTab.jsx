@@ -18,6 +18,15 @@ export default function ExercisesTab({ db, setDb }) {
     const name = newExercise.trim();
     if (!name) return;
 
+    // Prevent duplicates (case-insensitive)
+    const exists = (db.exercises || []).some(
+      (ex) => ex.name.toLowerCase().trim() === name.toLowerCase()
+    );
+    if (exists) {
+      alert("This exercise already exists!");
+      return;
+    }
+
     const next = {
       ...db,
       exercises: [
