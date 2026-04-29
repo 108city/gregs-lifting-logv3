@@ -63,14 +63,14 @@ function isMeaningfulWorkout(w) {
   return exs.some((ex) => getSets(ex).some(hasRealSet));
 }
 const ratingBtnClasses = (active, color) =>
-  `px-2 py-1 rounded text-sm ${
+  `px-3 py-1.5 rounded-full text-xs font-medium border transition ${
     active
       ? color === "green"
-        ? "bg-green-600 text-white"
+        ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
         : color === "orange"
-        ? "bg-orange-500 text-black"
-        : "bg-red-600 text-white"
-      : "bg-zinc-800 text-zinc-200"
+        ? "bg-amber-500/15 text-amber-300 border-amber-500/40"
+        : "bg-red-500/15 text-red-300 border-red-500/40"
+      : "bg-zinc-800/60 text-zinc-400 border-zinc-700 hover:border-zinc-600"
   }`;
 const normKeyFromWorkout = (w) => {
   if (!w) return "nil";
@@ -178,25 +178,25 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
 
   return (
     <Portal>
-      <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-        <div className="relative z-10 w-[min(96vw,900px)] max-h-[90vh] overflow-auto rounded-2xl border border-gray-200 bg-white shadow-2xl">
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative z-10 w-full max-w-2xl max-h-[90vh] overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
           {/* Header */}
-          <div className="border-b border-gray-200 p-5">
+          <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-900/95 backdrop-blur p-5">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-lg font-semibold text-black">{headerTitle}</h3>
+              <h3 className="text-base font-semibold text-zinc-100">{headerTitle}</h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setShowDeleteConfirm(true)}
-                  className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm text-red-700 hover:bg-red-100"
+                  className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/15 transition"
                 >
                   Delete
                 </button>
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
+                  className="rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 transition"
                 >
                   Cancel
                 </button>
@@ -205,65 +205,34 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
           </div>
 
           {/* Content */}
-          <div className="p-5">
-            <div className="space-y-4">
+          <div className="p-4 sm:p-5">
+            <div className="space-y-3">
               {(editedWorkout.entries || []).map((entry, exerciseIdx) => (
-                <div key={exerciseIdx} className="rounded border border-zinc-700 bg-zinc-900">
-                  <div className="p-3 flex items-center justify-between gap-2 flex-wrap">
+                <div key={exerciseIdx} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
+                  <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2 flex-wrap">
                     <div>
-                      <div className="font-medium text-white">{entry.exerciseName}</div>
+                      <div className="font-semibold text-zinc-100">{entry.exerciseName}</div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        className={ratingBtnClasses(entry.rating === "easy", "green")}
-                        onClick={() => updateRating(exerciseIdx, "easy")}
-                      >
-                        Easy
-                      </button>
-                      <button
-                        type="button"
-                        className={ratingBtnClasses(entry.rating === "moderate", "orange")}
-                        onClick={() => updateRating(exerciseIdx, "moderate")}
-                      >
-                        Moderate
-                      </button>
-                      <button
-                        type="button"
-                        className={ratingBtnClasses(entry.rating === "hard", "red")}
-                        onClick={() => updateRating(exerciseIdx, "hard")}
-                      >
-                        Hard
-                      </button>
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" className={ratingBtnClasses(entry.rating === "easy", "green")} onClick={() => updateRating(exerciseIdx, "easy")}>Easy</button>
+                      <button type="button" className={ratingBtnClasses(entry.rating === "moderate", "orange")} onClick={() => updateRating(exerciseIdx, "moderate")}>Mod</button>
+                      <button type="button" className={ratingBtnClasses(entry.rating === "hard", "red")} onClick={() => updateRating(exerciseIdx, "hard")}>Hard</button>
                     </div>
                   </div>
 
-                  <div className="border-t border-zinc-700 p-3 space-y-2">
+                  <div className="border-t border-zinc-800/80 divide-y divide-zinc-800/60">
                     {(entry.sets || []).map((set, setIdx) => (
-                      <div key={setIdx} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
-                        <div className="text-sm text-zinc-400">Set {setIdx + 1}</div>
-
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs text-zinc-400">Reps</span>
-                          <input
-                            type="number"
-                            min={0}
-                            value={String(set.reps || "")}
-                            onChange={(e) => updateSet(exerciseIdx, setIdx, "reps", e.target.value)}
-                            className="p-2 rounded bg-zinc-800 text-zinc-100 border border-zinc-600"
-                          />
+                      <div key={setIdx} className="grid grid-cols-[36px_1fr_1fr] gap-3 items-center px-3 py-2.5">
+                        <div className="text-xs text-zinc-500 font-mono text-center">#{setIdx + 1}</div>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Reps</span>
+                          <input type="number" min={0} value={String(set.reps || "")} onChange={(e) => updateSet(exerciseIdx, setIdx, "reps", e.target.value)}
+                            className="px-2.5 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm" />
                         </div>
-
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs text-zinc-400">Weight (kg)</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.5"
-                            value={String(set.kg || "")}
-                            onChange={(e) => updateSet(exerciseIdx, setIdx, "kg", e.target.value)}
-                            className="p-2 rounded bg-zinc-800 text-zinc-100 border border-zinc-600"
-                          />
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Weight (kg)</span>
+                          <input type="number" min={0} step="0.5" value={String(set.kg || "")} onChange={(e) => updateSet(exerciseIdx, setIdx, "kg", e.target.value)}
+                            className="px-2.5 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm" />
                         </div>
                       </div>
                     ))}
@@ -274,20 +243,14 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
           </div>
 
           {/* Footer */}
-          <div className="border-t border-gray-200 p-5">
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 text-black"
-              >
+          <div className="sticky bottom-0 border-t border-zinc-800 bg-zinc-900/95 backdrop-blur p-4">
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={onClose}
+                className="rounded-lg border border-zinc-700 bg-zinc-800/60 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
-              >
+              <button type="button" onClick={handleSave}
+                className="rounded-lg bg-emerald-500 hover:bg-emerald-400 px-4 py-2 text-sm font-semibold text-zinc-950 transition">
                 Save Changes
               </button>
             </div>
@@ -295,30 +258,20 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
 
           {/* Delete Confirmation Dialog */}
           {showDeleteConfirm && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
-              <div
-                className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4 pointer-events-auto"
-                role="dialog"
-                aria-modal="true"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h4 className="text-lg font-semibold text-black mb-2">Delete Workout?</h4>
-                <p className="text-gray-600 mb-4">
-                  This will permanently delete this workout from {formatShortDate(workout)}. This action cannot be undone.
+            <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm rounded-2xl p-4">
+              <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl shadow-2xl max-w-sm w-full pointer-events-auto"
+                role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+                <h4 className="text-base font-semibold text-zinc-100 mb-2">Delete workout?</h4>
+                <p className="text-sm text-zinc-400 mb-5">
+                  This permanently deletes the workout from {formatShortDate(workout)}. This can't be undone.
                 </p>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowDeleteConfirm(false)}
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50 text-black"
-                  >
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleDelete}
-                    className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700"
-                  >
+                  <button type="button" onClick={handleDelete}
+                    className="flex-1 rounded-lg bg-red-600 hover:bg-red-500 px-3 py-2 text-sm font-medium text-white transition">
                     Delete
                   </button>
                 </div>
@@ -385,45 +338,41 @@ export default function RecentWorkoutsCloud({ programs, db, setDb }) {
   if (!items || items.length === 0) return null;
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-base font-semibold">Last 5 Saved Workouts</h3>
+        <h3 className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-semibold">Recent Workouts</h3>
+        <span className="text-[10px] text-zinc-500">{items.length} of last 5</span>
       </div>
 
-      <div className="grid gap-3">
+      <div className="space-y-2">
         {items.map((w, idx) => {
           const key = w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`;
           const exCount = getExercisesFromWorkout(w).length;
+          const prog = programs?.find?.((p) => p.id === w?.programId);
+          const dayIdx = prog ? (prog.days || []).findIndex((d) => d.id === w?.dayId) : -1;
+          const dayLabel = dayIdx >= 0 ? `Day ${dayIdx + 1}` : "Day ?";
           return (
-            <div
+            <button
               key={key}
-              className="rounded-xl border border-gray-200 p-4 hover:border-gray-300 transition-colors"
+              type="button"
+              onClick={() => setSelected(w)}
+              className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 hover:bg-zinc-900 px-4 py-3 transition group"
             >
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <div className="font-medium text-gray-900">{formatShortDate(w)}</div>
-                  <div className="text-sm text-gray-500">
-                    {morningOrEvening(w)} •{" "}
-                    {(() => {
-                      const prog = programs?.find?.((p) => p.id === w?.programId);
-                      if (!prog) return "Day ?";
-                      const idxDay = (prog.days || []).findIndex((d) => d.id === w?.dayId);
-                      return idxDay >= 0 ? `Day ${idxDay + 1}` : "Day ?";
-                    })()}
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-medium text-zinc-100 text-sm">{formatShortDate(w)}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700">
+                      {morningOrEvening(w)}
+                    </span>
                   </div>
-                  <div className="text-xs text-gray-400">{exCount} exercise(s)</div>
+                  <div className="text-xs text-zinc-500">
+                    {dayLabel} · {exCount} exercise{exCount === 1 ? '' : 's'}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelected(w)}
-                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
-                  >
-                    View & Edit
-                  </button>
-                </div>
+                <span className="text-zinc-600 group-hover:text-emerald-400 transition text-lg">›</span>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>

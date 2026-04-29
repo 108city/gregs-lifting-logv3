@@ -5,14 +5,21 @@ import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
+import { LogoBarbell } from "./components/LogoLab";
 
 import { runMigrations } from "./migrations";
 
 const STORAGE_KEY = "gregs-lifting-log";
 
+const TAB_TITLES = {
+  log: "Today's Workout",
+  progress: "Progress",
+  program: "Programs",
+  exercises: "Exercises",
+};
+
 export default function App() {
   const [db, setDb] = useState(() => {
-    // ... initial load ...
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       return raw
@@ -24,12 +31,11 @@ export default function App() {
   });
 
   const [activeTab, setActiveTab] = useState("log");
-  const [syncStatus, setSyncStatus] = useState("idle"); // idle, syncing, success, error
+  const [syncStatus, setSyncStatus] = useState("idle");
   const [syncError, setSyncError] = useState("");
   const [syncId, setSyncId] = useState("gregs-device");
   const hasHydratedFromCloud = useRef(false);
 
-  // 1) Hydrate from cloud at startup
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -37,133 +43,98 @@ export default function App() {
         const cloud = await loadFromCloud();
         if (!mounted) return;
 
-        console.log("=== CLOUD LOAD ===");
-        console.log("Cloud data:", cloud);
-
-        let mergedDb = db; // default to current state if nothing found
-
+        let mergedDb = db;
         if (cloud?.data && Object.keys(cloud.data).length) {
-          console.log("Using cloud data");
           mergedDb = cloud.data;
-        } else {
-          console.log("Using local data");
         }
 
-        // --- RUN MIGRATIONS ---
         const migrated = runMigrations(mergedDb);
-        if (migrated) {
-          console.log("Migrations applied, updating state.");
-          mergedDb = migrated;
-        }
+        if (migrated) mergedDb = migrated;
 
         hasHydratedFromCloud.current = true;
         setDb(mergedDb);
         setSyncStatus("success");
       } catch (e) {
-        console.warn("Cloud load failed:", e.message);
         setSyncError(e.message);
         setSyncStatus("error");
-        hasHydratedFromCloud.current = true; // Still mark as hydrated to allow local work
-      } finally {
-        console.log("Hydration complete");
+        hasHydratedFromCloud.current = true;
       }
     })();
+    return () => { mounted = false; };
   }, []);
 
-  // 2) Sync every state change
   useEffect(() => {
-    console.log("=== DB STATE CHANGE ===");
-    console.log("hasHydrated:", hasHydratedFromCloud.current);
-    console.log("New state:", {
-      exercises: db.exercises?.length || 0,
-      programs: db.programs?.length || 0,
-      log: db.log?.length || 0
-    });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(db)); } catch {}
 
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-      console.log("Saved to localStorage");
-    } catch { }
+    if (!hasHydratedFromCloud.current) return;
 
-    if (!hasHydratedFromCloud.current) {
-      console.log("Skipping cloud sync - not hydrated yet");
-      return;
-    }
-
-    console.log("Triggering cloud sync...");
     setSyncStatus("syncing");
     saveToCloud(db, syncId)
-      .then(() => {
-        setSyncStatus("success");
-        setSyncError("");
-      })
-      .catch(e => {
-        console.error("Auto sync failed:", e);
-        setSyncError(e.message);
-        setSyncStatus("error");
-      });
+      .then(() => { setSyncStatus("success"); setSyncError(""); })
+      .catch(e => { setSyncError(e.message); setSyncStatus("error"); });
   }, [db, syncId]);
 
-  const forceSync = async () => {
-    setSyncStatus("syncing");
-    try {
-      const cloud = await loadFromCloud();
-      if (cloud?.data) {
-        setDb(cloud.data);
-        if (cloud.rowId) setSyncId(cloud.rowId);
-        setSyncStatus("success");
-        setSyncError("");
-      }
-    } catch (e) {
-      setSyncError(e.message);
-      setSyncStatus("error");
-    }
-  };
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      {/* Top App Bar */}
+      <header className="sticky top-0 z-30 border-b border-zinc-800/80 bg-zinc-950/85 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/70 pt-[var(--safe-top)]">
+        <div className="mx-auto max-w-2xl flex items-center justify-between px-4 h-14">
+          <div className="flex items-center gap-2.5">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-900/40 text-zinc-950">
+              <LogoBarbell size={22} />
+            </div>
+            <div className="leading-tight">
+              <div className="text-[15px] font-semibold tracking-tight text-zinc-100">Lifting Log</div>
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500">{TAB_TITLES[activeTab]}</div>
+            </div>
+          </div>
+          <SyncIndicator status={syncStatus} error={syncError} />
+        </div>
+      </header>
+
+      {/* Main content */}
+      <main className="mx-auto max-w-2xl px-4 pt-4 pb-24">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsContent value="log">
+            <LogTab db={db} setDb={setDb} />
+          </TabsContent>
+          <TabsContent value="progress">
+            <ProgressTab db={db} setDb={setDb} />
+          </TabsContent>
+          <TabsContent value="program">
+            <ProgramTab db={db} setDb={setDb} />
+          </TabsContent>
+          <TabsContent value="exercises">
+            <ExercisesTab db={db} setDb={setDb} />
+          </TabsContent>
+
+          <TabsList>
+            <TabsTrigger value="log">Log</TabsTrigger>
+            <TabsTrigger value="progress">Progress</TabsTrigger>
+            <TabsTrigger value="program">Program</TabsTrigger>
+            <TabsTrigger value="exercises">Exercises</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </main>
+    </div>
+  );
+}
+
+function SyncIndicator({ status, error }) {
+  const cfg = {
+    idle:    { color: "bg-zinc-600", label: "Offline" },
+    syncing: { color: "bg-amber-400 animate-pulse", label: "Syncing" },
+    success: { color: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]", label: "Synced" },
+    error:   { color: "bg-red-500", label: "Error" },
+  }[status] || { color: "bg-zinc-600", label: "Offline" };
 
   return (
-    <div className="min-h-screen bg-black text-blue-500 p-4">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold">Greg&apos;s Lifting Log</h1>
-      </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-4">
-          <TabsTrigger value="log">Log</TabsTrigger>
-          <TabsTrigger value="progress">Progress</TabsTrigger>
-          <TabsTrigger value="program">Program</TabsTrigger>
-          <TabsTrigger value="exercises">Exercises</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="log">
-          <LogTab db={db} setDb={setDb} />
-        </TabsContent>
-
-        <TabsContent value="progress">
-          <ProgressTab db={db} setDb={setDb} />
-        </TabsContent>
-
-        <TabsContent value="program">
-          <ProgramTab db={db} setDb={setDb} />
-        </TabsContent>
-
-        <TabsContent value="exercises">
-          <ExercisesTab db={db} setDb={setDb} />
-        </TabsContent>
-      </Tabs>
-
-      {/* Sync Footer */}
-      <div className="mt-8 pt-4 border-t border-zinc-900 flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-600 font-medium">
-        <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'success' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' :
-            syncStatus === 'syncing' ? 'bg-yellow-500 animate-pulse' :
-              syncStatus === 'error' ? 'bg-red-500' : 'bg-zinc-700'
-            }`} />
-          <span>{syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'success' ? 'Cloud Synced' : syncStatus === 'error' ? `Error: ${syncError}` : 'Offline'}</span>
-        </div>
-        <div>
-          V7.2 ALPHA
-        </div>
-      </div>
+    <div
+      className="flex items-center gap-1.5 rounded-full bg-zinc-900/80 border border-zinc-800 px-2.5 py-1"
+      title={status === "error" ? error : cfg.label}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${cfg.color}`} />
+      <span className="text-[10px] uppercase tracking-wider text-zinc-400">{cfg.label}</span>
     </div>
   );
 }

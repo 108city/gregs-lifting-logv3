@@ -28,7 +28,7 @@ function ProgramList({ programs, activeProgramId, onSelect, onCreate, onSetActiv
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-white">Your Programs</h2>
-        <Button onClick={onCreate} className="bg-blue-600 hover:bg-blue-700 text-white">
+        <Button onClick={onCreate} className="bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold shadow-sm shadow-emerald-900/30">
           + New Program
         </Button>
       </div>
@@ -36,7 +36,7 @@ function ProgramList({ programs, activeProgramId, onSelect, onCreate, onSetActiv
       {programs.length === 0 ? (
         <div className="text-center py-10 text-zinc-500 border border-dashed border-zinc-800 rounded-lg">
           <p>No programs found.</p>
-          <Button variant="link" onClick={onCreate} className="text-blue-500 mt-2">
+          <Button variant="link" onClick={onCreate} className="text-emerald-400 mt-2">
             Create your first program
           </Button>
         </div>
@@ -63,7 +63,7 @@ function ProgramList({ programs, activeProgramId, onSelect, onCreate, onSetActiv
             return (
               <Card
                 key={p.id}
-                className={`bg-zinc-900 border-zinc-800 hover:border-zinc-600 transition-colors cursor-pointer group ${isActive ? 'ring-2 ring-blue-500/50' : ''}`}
+                className={`bg-zinc-900/60 border-zinc-800 hover:border-zinc-700 transition cursor-pointer group ${isActive ? 'ring-1 ring-emerald-500/60 border-emerald-500/30' : ''}`}
                 onClick={() => onSelect(p.id)}
               >
                 <CardHeader>
@@ -75,7 +75,7 @@ function ProgramList({ programs, activeProgramId, onSelect, onCreate, onSetActiv
                       </CardDescription>
                     </div>
                     {isActive && (
-                      <span className="bg-blue-900/30 text-blue-400 text-xs px-2 py-1 rounded border border-blue-900/50">
+                      <span className="bg-emerald-500/15 text-emerald-300 text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded-full border border-emerald-500/40">
                         Active
                       </span>
                     )}
@@ -98,7 +98,7 @@ function ProgramList({ programs, activeProgramId, onSelect, onCreate, onSetActiv
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-8 text-blue-400 hover:text-blue-300 hover:bg-blue-900/20"
+                        className="h-8 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
                         onClick={(e) => {
                           e.stopPropagation();
                           onSetActive(p.id);
@@ -222,7 +222,7 @@ function ProgramEditor({ program, exercises, onSave, onCancel }) {
           <Button variant="outline" onClick={onCancel} className="border-zinc-700 text-white hover:bg-zinc-800">
             Cancel
           </Button>
-          <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button onClick={handleSave} className="bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold shadow-sm shadow-emerald-900/30">
             Save Changes
           </Button>
         </div>
@@ -268,7 +268,7 @@ function ProgramEditor({ program, exercises, onSave, onCancel }) {
                   <Input
                     value={day.name}
                     onChange={e => renameDay(day.id, e.target.value)}
-                    className="bg-transparent border-transparent hover:border-zinc-700 focus:border-blue-500 font-semibold text-lg max-w-xs p-0 px-2 h-auto"
+                    className="bg-transparent border-transparent hover:border-zinc-700 focus:border-emerald-500 font-semibold text-lg max-w-xs p-0 px-2 h-auto"
                   />
                   <Button
                     size="sm"
@@ -321,7 +321,7 @@ function ProgramEditor({ program, exercises, onSave, onCancel }) {
                 {/* Add Exercise Control */}
                 <div className="pt-2">
                   <select
-                    className="w-full p-2 rounded bg-zinc-950 border border-zinc-800 text-zinc-300 text-sm focus:border-blue-500 outline-none cursor-pointer hover:bg-zinc-900"
+                    className="w-full p-2 rounded bg-zinc-950 border border-zinc-800 text-zinc-300 text-sm focus:border-emerald-500 outline-none cursor-pointer hover:bg-zinc-900"
                     onChange={(e) => {
                       if (e.target.value) {
                         addExercise(day.id, e.target.value);

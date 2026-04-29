@@ -40,11 +40,11 @@ function formatShortDate(w) {
   return dt.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 function morningOrEvening(w) {
-  const dt =
-    toDate(w?.startedAt) ||
-    toDate(w?.endedAt) ||
-    (w?.date ? new Date(w.date + "T00:00:00") : null);
-  if (!dt || Number.isNaN(dt.getTime())) return "—";
+  // Only label morning/evening if we actually have a clock time.
+  // A bare `date` string (e.g. "2026-04-29") would parse to midnight and
+  // mislabel everything as "Morning".
+  const dt = toDate(w?.endedAt) || toDate(w?.startedAt);
+  if (!dt || Number.isNaN(dt.getTime())) return null;
   const h = dt.getHours();
   return h < 12 ? "Morning" : "Evening";
 }
@@ -94,6 +94,9 @@ function hasRealSet(s) {
   return reps > 0 || wt > 0 || notesOk;
 }
 function isMeaningfulWorkout(w) {
+  // Only count workouts the user has explicitly ended.
+  // Treat undefined as `true` so legacy logs (pre-completed-flag) still count.
+  if (w?.completed === false) return false;
   const exs = getExercisesFromWorkout(w);
   if (exs.length === 0) return false;
   return exs.some((ex) => getSets(ex).some(hasRealSet));
@@ -105,13 +108,13 @@ function dayNumberLabel(w, programs) {
   return idx >= 0 ? `Day ${idx + 1}` : "Day ?";
 }
 const ratingBtnClasses = (active, color) =>
-  `px-2 py-1 rounded text-sm ${active
+  `px-3 py-1.5 rounded-full text-xs font-medium border transition ${active
     ? color === "green"
-      ? "bg-green-600 text-white"
+      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
       : color === "orange"
-        ? "bg-orange-500 text-black"
-        : "bg-red-600 text-white"
-    : "bg-zinc-800 text-zinc-200"
+        ? "bg-amber-500/15 text-amber-300 border-amber-500/40"
+        : "bg-red-500/15 text-red-300 border-red-500/40"
+    : "bg-zinc-800/60 text-zinc-400 border-zinc-700 hover:border-zinc-600"
   }`;
 
 /* ─────────── Safe Portal ─────────── */
@@ -133,9 +136,11 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
 
   if (!open || !workout || !editedWorkout) return null;
 
-  const headerTitle = `${formatShortDate(workout)} • ${morningOrEvening(
-    workout
-  )} • ${dayNumberLabel(workout, programs)}`;
+  const headerTitle = [
+    formatShortDate(workout),
+    morningOrEvening(workout),
+    dayNumberLabel(workout, programs),
+  ].filter(Boolean).join(" • ");
 
   const updateSet = (exerciseIdx, setIdx, field, value) => {
     setEditedWorkout((prev) => {
@@ -196,24 +201,24 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
   return (
     <Portal>
       <div className="fixed inset-0 z-[9999] flex items-center justify-center">
-        <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-        <div className="relative z-10 w-[min(96vw,900px)] max-h-[90vh] overflow-auto rounded-2xl border border-gray-200 bg-white shadow-2xl">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative z-10 w-[min(96vw,900px)] max-h-[90vh] overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
           {/* Header */}
-          <div className="border-b border-gray-200 p-5">
+          <div className="border-b border-zinc-800 p-5">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-lg font-semibold text-black">{headerTitle}</h3>
+              <h3 className="text-lg font-semibold text-zinc-100">{headerTitle}</h3>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setShowDeleteConfirm(true)}
-                  className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm text-red-700 hover:bg-red-100"
+                  className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/15 transition"
                 >
                   Delete
                 </button>
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
+                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800 text-zinc-100"
                 >
                   Cancel
                 </button>
@@ -293,19 +298,19 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
           </div>
 
           {/* Footer */}
-          <div className="border-t border-gray-200 p-5">
+          <div className="border-t border-zinc-800 p-5">
             <div className="flex justify-end gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 text-black"
+                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800 text-zinc-100"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSave}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                className="rounded-lg bg-emerald-500 hover:bg-emerald-400 px-4 py-2 text-sm font-semibold text-zinc-950"
               >
                 Save Changes
               </button>
@@ -316,20 +321,20 @@ function EditWorkoutModal({ open, onClose, workout, programs, onSave, onDelete }
           {showDeleteConfirm && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl">
               <div
-                className="bg-white p-6 rounded-xl shadow-xl max-w-sm mx-4 pointer-events-auto"
+                className="bg-zinc-900 p-6 rounded-xl shadow-xl max-w-sm mx-4 pointer-events-auto"
                 role="dialog"
                 aria-modal="true"
                 onClick={(e) => e.stopPropagation()}
               >
-                <h4 className="text-lg font-semibold text-black mb-2">Delete Workout?</h4>
-                <p className="text-gray-600 mb-4">
+                <h4 className="text-lg font-semibold text-zinc-100 mb-2">Delete Workout?</h4>
+                <p className="text-zinc-400 mb-4">
                   This will permanently delete this workout from {formatShortDate(workout)}. This action cannot be undone.
                 </p>
                 <div className="flex gap-3">
                   <button
                     type="button"
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50 text-black"
+                    className="flex-1 rounded-lg border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-800 text-zinc-100"
                   >
                     Cancel
                   </button>
@@ -401,40 +406,40 @@ function RecentWorkoutsCloud({ programs, setDb, db }) {
   if (!items || items.length === 0) return null;
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-base font-semibold">Last 5 Saved Workouts</h3>
+        <h3 className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-semibold">Recent Workouts</h3>
+        <span className="text-[10px] text-zinc-500">{items.length} of last 5</span>
       </div>
 
-      <div className="grid gap-3">
+      <div className="space-y-2">
         {items.map((w, idx) => {
           const key = w.id || `${w.date || w.endedAt || w.startedAt}-${idx}`;
+          const exCount = getExercisesFromWorkout(w).length;
           return (
-            <div
+            <button
               key={key}
-              className="rounded-xl border border-gray-200 p-4 hover:border-gray-300 transition-colors"
+              type="button"
+              onClick={() => handleView(w)}
+              className="w-full text-left rounded-xl border border-zinc-800 bg-zinc-900/80 hover:border-zinc-700 hover:bg-zinc-900 px-4 py-3 transition group"
             >
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <div className="font-medium text-gray-900">{formatShortDate(w)}</div>
-                  <div className="text-sm text-gray-500">
-                    {morningOrEvening(w)} • {dayNumberLabel(w, programs)}
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-medium text-zinc-100 text-sm">{formatShortDate(w)}</span>
+                    {morningOrEvening(w) && (
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700">
+                        {morningOrEvening(w)}
+                      </span>
+                    )}
                   </div>
-                  <div className="text-xs text-gray-400">
-                    {getExercisesFromWorkout(w).length} exercise(s)
+                  <div className="text-xs text-zinc-500">
+                    {dayNumberLabel(w, programs)} · {exCount} exercise{exCount === 1 ? '' : 's'}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleView(w)}
-                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 text-black"
-                  >
-                    View & Edit
-                  </button>
-                </div>
+                <span className="text-zinc-600 group-hover:text-emerald-400 transition text-lg">›</span>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -482,13 +487,13 @@ function TwoWeekCalendar({ workouts }) {
 
   const cellBase =
     "h-24 rounded-xl border flex flex-col items-center justify-center p-2 text-sm transition-colors";
-  const labelCls = "text-[10px] text-gray-500 font-medium";
+  const labelCls = "text-[10px] text-zinc-400 font-medium";
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-base font-semibold">Last 2 Weeks</h3>
-        <p className="text-xs text-gray-500">💪 worked • 😴 rest</p>
+        <h3 className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-semibold">Last 2 Weeks</h3>
+        <p className="text-[10px] text-zinc-500">💪 trained · 😴 rest</p>
       </div>
 
       <div className="grid grid-cols-7 gap-3">
@@ -498,7 +503,7 @@ function TwoWeekCalendar({ workouts }) {
           return (
             <div
               key={`r1-${i}`}
-              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
+              className={`${cellBase} ${didWork ? "border-emerald-500/30 bg-emerald-500/10" : "border-zinc-800 bg-zinc-900/40"
                 }`}
               title={key}
             >
@@ -506,7 +511,7 @@ function TwoWeekCalendar({ workouts }) {
               <div className={`${labelCls} mb-0.5`}>
                 {d.toLocaleDateString(undefined, { weekday: "short" })}
               </div>
-              <div className="text-xs font-semibold text-gray-700">{d.getDate()}</div>
+              <div className="text-xs font-semibold text-zinc-200">{d.getDate()}</div>
             </div>
           );
         })}
@@ -519,7 +524,7 @@ function TwoWeekCalendar({ workouts }) {
           return (
             <div
               key={`r2-${i}`}
-              className={`${cellBase} ${didWork ? "border-green-200 bg-green-50" : "border-gray-200 bg-gray-50"
+              className={`${cellBase} ${didWork ? "border-emerald-500/30 bg-emerald-500/10" : "border-zinc-800 bg-zinc-900/40"
                 }`}
               title={key}
             >
@@ -527,7 +532,7 @@ function TwoWeekCalendar({ workouts }) {
               <div className={`${labelCls} mb-0.5`}>
                 {d.toLocaleDateString(undefined, { weekday: "short" })}
               </div>
-              <div className="text-xs font-semibold text-gray-700">{d.getDate()}</div>
+              <div className="text-xs font-semibold text-zinc-200">{d.getDate()}</div>
             </div>
           );
         })}
@@ -678,29 +683,41 @@ export default function ProgressTab({ db, setDb }) {
       .sort((a, b) => b.value - a.value);
   }, [filteredLog, db?.exercises]);
 
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#6366f1', '#64748b'];
+  const COLORS = ['#10b981', '#f59e0b', '#ec4899', '#3b82f6', '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16'];
+
+  if (filteredLog.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 px-6 py-16 text-center">
+        <div className="text-4xl mb-3">📈</div>
+        <div className="text-zinc-200 font-semibold mb-1">No progress yet</div>
+        <div className="text-sm text-zinc-500 max-w-xs mx-auto">Save your first workout from the Log tab and your stats will appear here.</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4">
+    <div className="space-y-5">
       {/* KPIs */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-gray-500">Workouts in Last 7 Days</p>
-          <p className="mt-1 text-2xl font-semibold">{recent7}</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-900/40 p-4">
+          <p className="text-[10px] uppercase tracking-widest text-emerald-400/80 font-semibold">Last 7 Days</p>
+          <p className="mt-1.5 text-3xl font-bold text-zinc-100 tabular-nums">{recent7}</p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">workout{recent7 === 1 ? '' : 's'}</p>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-gray-500">Workouts in Last 30 Days</p>
-          <p className="mt-1 text-2xl font-semibold">{recent30}</p>
+        <div className="rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-900/40 p-4">
+          <p className="text-[10px] uppercase tracking-widest text-emerald-400/80 font-semibold">Last 30 Days</p>
+          <p className="mt-1.5 text-3xl font-bold text-zinc-100 tabular-nums">{recent30}</p>
+          <p className="text-[11px] text-zinc-500 mt-0.5">workout{recent30 === 1 ? '' : 's'}</p>
         </div>
       </div>
 
       {/* Muscle Split Chart */}
       {muscleData.length > 0 && (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 flex flex-col sm:flex-row items-center justify-between">
             <div className="w-full sm:w-1/2">
-              <h3 className="text-base font-semibold mb-1">Muscle Group Split</h3>
-              <p className="text-xs text-gray-500 mb-4">Based on total sets logged</p>
+              <h3 className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-semibold mb-1">Muscle Group Split</h3>
+              <p className="text-xs text-zinc-500 mb-4">Based on total sets logged</p>
               <div className="space-y-2">
                 {muscleData.slice(0, 5).map((d, i) => (
                   <div key={d.name} className="flex items-center justify-between text-sm">
@@ -729,24 +746,27 @@ export default function ProgressTab({ db, setDb }) {
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip
+                    contentStyle={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 8, color: "#f4f4f5" }}
+                    labelStyle={{ color: "#a1a1aa" }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
           </div>
 
           {/* Category Breakdown Details */}
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <h3 className="text-base font-semibold mb-4">Category Breakdown</h3>
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+            <h3 className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-semibold mb-4">Category Breakdown</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {muscleData.map((cat, i) => (
-                <div key={cat.name} className="p-3 rounded-xl bg-gray-50 border border-gray-100">
-                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-200">
+                <div key={cat.name} className="p-3 rounded-xl bg-zinc-900/40 border border-zinc-800">
+                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-zinc-800">
                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                     <span className="font-semibold text-sm">{cat.name}</span>
-                    <span className="text-xs text-gray-500 ml-auto">{cat.value} sets</span>
+                    <span className="text-xs text-zinc-400 ml-auto">{cat.value} sets</span>
                   </div>
-                  <div className="space-y-1 text-xs text-gray-600">
+                  <div className="space-y-1 text-xs text-zinc-400">
                     {cat.details.map((ex, j) => (
                       <div key={ex.exName} className="flex justify-between">
                         <span className="truncate pr-2">{ex.exName}</span>
@@ -762,38 +782,35 @@ export default function ProgressTab({ db, setDb }) {
       )}
 
       {/* TOP: Exercise selector + stats block */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-base font-semibold">Max Weight Progress</h3>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">Exercise</label>
-            <select
-              value={selectedExercise}
-              onChange={(e) => setSelectedExercise(e.target.value)}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm sm:text-base text-gray-900"
-            >
-              {exerciseNames.map((name) => (
-                <option key={name} value={name} className="text-gray-900">
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <h3 className="text-[11px] uppercase tracking-widest text-emerald-400/80 font-semibold">Max Weight Progress</h3>
+          <select
+            value={selectedExercise}
+            onChange={(e) => setSelectedExercise(e.target.value)}
+            className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-100 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition"
+          >
+            {exerciseNames.map((name) => (
+              <option key={name} value={name} className="text-zinc-100">
+                {name}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <p className="text-xs text-gray-600">Starting Weight</p>
-            <p className="mt-1 text-2xl font-semibold">{startWeight}</p>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">Start</p>
+            <p className="mt-1 text-2xl font-bold text-zinc-100 tabular-nums">{startWeight}<span className="text-xs font-medium text-zinc-500 ml-1">kg</span></p>
           </div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <p className="text-xs text-gray-600">Current Max</p>
-            <p className="mt-1 text-2xl font-semibold">{maxWeight}</p>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">Max</p>
+            <p className="mt-1 text-2xl font-bold text-zinc-100 tabular-nums">{maxWeight}<span className="text-xs font-medium text-zinc-500 ml-1">kg</span></p>
           </div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <p className="text-xs text-gray-600">Difference</p>
-            <p className={`mt-1 text-2xl font-semibold ${diffWeight >= 0 ? "text-green-600" : "text-red-600"}`}>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">Δ</p>
+            <p className={`mt-1 text-2xl font-semibold ${diffWeight >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {diffWeight >= 0 ? "+" : ""}
               {diffWeight}
             </p>
@@ -804,11 +821,14 @@ export default function ProgressTab({ db, setDb }) {
         <div className="mt-4 h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={lineSeries} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="weight" name="Session max" dot activeDot={{ r: 4 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+              <XAxis dataKey="date" stroke="#71717a" tick={{ fill: "#a1a1aa", fontSize: 11 }} />
+              <YAxis stroke="#71717a" tick={{ fill: "#a1a1aa", fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 8, color: "#f4f4f5" }}
+                labelStyle={{ color: "#a1a1aa" }}
+              />
+              <Line type="monotone" dataKey="weight" name="Session max" stroke="#10b981" strokeWidth={2.5} dot={{ fill: "#10b981", r: 3 }} activeDot={{ r: 5, fill: "#34d399" }} />
             </LineChart>
           </ResponsiveContainer>
         </div>

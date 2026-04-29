@@ -379,5 +379,28 @@ export function runMigrations(db) {
         console.log(`[Migrations] ${V7_KEY} complete.`);
     }
 
+    // --- MIGRATION: Mark legacy logs as completed (v8) ---
+    // Every workout that existed before auto-save was added should be treated as
+    // a finished workout, since the only way to get one into the log used to be
+    // clicking the Save button. Going forward, auto-save writes `completed:false`
+    // and "End Workout" flips it to `completed:true`.
+    const V8_KEY = "completed-flag-v8";
+    if (!applied.has(V8_KEY)) {
+        console.log(`[Migrations] Running ${V8_KEY}...`);
+
+        if (Array.isArray(newDb.log)) {
+            newDb.log = newDb.log.map((workout) =>
+                typeof workout?.completed === "boolean"
+                    ? workout
+                    : { ...workout, completed: true }
+            );
+        }
+
+        applied.add(V8_KEY);
+        newDb.migrationsApplied = Array.from(applied);
+        changed = true;
+        console.log(`[Migrations] ${V8_KEY} complete.`);
+    }
+
     return changed ? newDb : null;
 }

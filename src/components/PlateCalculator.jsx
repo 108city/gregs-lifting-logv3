@@ -95,7 +95,7 @@ export default function PlateCalculator({ onClose }) {
                         </div>
                     </div>
 
-                    <Button onClick={onCalculateClick} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-6">
+                    <Button onClick={onCalculateClick} className="w-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold py-6">
                         Calculate
                     </Button>
 
@@ -106,7 +106,7 @@ export default function PlateCalculator({ onClose }) {
                                 {results.map((r, i) => (
                                     <div key={i} className="flex justify-between items-center border-b border-zinc-800/50 pb-2 last:border-0">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white shadow-lg shadow-blue-900/20">
+                                            <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-xs font-bold text-zinc-950 shadow-lg shadow-emerald-900/30">
                                                 {r.count}
                                             </div>
                                             <span className="text-zinc-300">x</span>

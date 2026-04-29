@@ -130,4 +130,7 @@ backup_supabase.cjs
 migrate_to_firebase.mjs
 verify_firebase.mjs
 check_supabase.cjs
+inspect_recent.mjs
+remove_dummy.mjs
+generate_icons.mjs
 supabase_backup_*.json
