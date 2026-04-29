@@ -79,6 +79,26 @@ function seedWorking(db, program, day, date) {
     )
     .sort((a, b) => b.date.localeCompare(a.date))[0];
 
+  // Cross-program fallback: for exercises that don't appear in lastSession,
+  // pull the most recent top-set weight you've ever lifted on them.
+  const exerciseHistory = new Map(); // exerciseId -> { kg, date }
+  for (const s of (db.log || [])) {
+    if (s?.completed === false) continue;
+    if (!s?.date || s.date >= date) continue;
+    for (const e of (s.entries || [])) {
+      if (!e?.exerciseId) continue;
+      const topKg = (e.sets || []).reduce(
+        (m, x) => Math.max(m, Number(x?.kg || 0)),
+        0
+      );
+      if (topKg <= 0) continue;
+      const prev = exerciseHistory.get(e.exerciseId);
+      if (!prev || s.date > prev.date) {
+        exerciseHistory.set(e.exerciseId, { kg: topKg, date: s.date });
+      }
+    }
+  }
+
   return {
     date,
     programId: program.id,
@@ -88,15 +108,18 @@ function seedWorking(db, program, day, date) {
       const prevEntry = lastSession?.entries?.find(
         (e) => e.exerciseId === it.exerciseId
       );
+      const fallback = !prevEntry ? exerciseHistory.get(it.exerciseId) : null;
+
       const sets = Array.from(
         { length: clampInt(it.sets ?? 1, 1, 100) },
         (_, i) => ({
           reps: String(clampInt(it.reps ?? 1, 1, 100)),
           kg:
-            prevEntry?.sets?.[i]?.kg !== undefined &&
-              prevEntry?.sets?.[i]?.kg !== null
+            prevEntry?.sets?.[i]?.kg != null
               ? String(prevEntry.sets[i].kg)
-              : "",
+              : fallback?.kg
+                ? String(fallback.kg)
+                : "",
         })
       );
       return {
@@ -105,6 +128,8 @@ function seedWorking(db, program, day, date) {
         exerciseName: it.name,
         rating: prevEntry?.rating ?? null,
         sets,
+        // UI hint — only present when we filled from cross-program history.
+        suggestedFrom: fallback ? { kg: fallback.kg, date: fallback.date } : null,
       };
     }),
   };
@@ -135,7 +160,7 @@ export default function LogTab({ db, setDb }) {
   const dbRef = useRef(db);
   useEffect(() => { dbRef.current = db; }, [db]);
   const skipNextSeedRef = useRef(false);
-  const initialAutoSaveSkippedRef = useRef(false);
+  const userTouchedRef = useRef(false); // true once the user has actually edited a value
   const autoSaveTimerRef = useRef(null);
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState(null);
   const [autoSaveTick, setAutoSaveTick] = useState(0);
@@ -146,8 +171,11 @@ export default function LogTab({ db, setDb }) {
       skipNextSeedRef.current = false;
       return;
     }
-    setWorking(seedWorking(dbRef.current, activeProgram, day, date));
-    initialAutoSaveSkippedRef.current = false; // allow auto-save once user edits the new seed
+    const seeded = seedWorking(dbRef.current, activeProgram, day, date);
+    setWorking(seeded);
+    // If we restored an in-progress entry (sessionId set), treat as user-touched
+    // so further edits keep auto-saving. Otherwise this is a fresh seed.
+    userTouchedRef.current = !!seeded.sessionId;
   }, [activeProgram?.id, day?.id, date]);
 
   // Tick once a minute so the "saved Xs ago" label stays fresh.
@@ -162,11 +190,9 @@ export default function LogTab({ db, setDb }) {
     if (!activeProgram || !day) return;
     if (!working?.entries?.length) return;
 
-    // Skip the first run after a fresh seed — nothing has actually changed yet.
-    if (!initialAutoSaveSkippedRef.current) {
-      initialAutoSaveSkippedRef.current = true;
-      return;
-    }
+    // Only auto-save after the user has actually edited something. Stops the
+    // seed itself (or pre-filled suggestions) from creating phantom entries.
+    if (!userTouchedRef.current) return;
 
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -182,11 +208,12 @@ export default function LogTab({ db, setDb }) {
   const autoSaveDraft = () => {
     if (!activeProgram || !day) return;
 
-    // Skip totally empty workouts — don't litter the log with placeholders.
-    const hasAnyData = working.entries?.some((e) =>
-      e.sets?.some((s) => Number(s.kg || 0) > 0 || Number(s.reps || 0) > 0)
+    // Belt-and-braces: even if userTouched somehow flipped without real data,
+    // never persist a workout that has no actual weight on it.
+    const hasAnyWeight = working.entries?.some((e) =>
+      e.sets?.some((s) => Number(s.kg || 0) > 0)
     );
-    if (!hasAnyData) return;
+    if (!hasAnyWeight) return;
 
     const currentDb = dbRef.current;
     const log = currentDb.log || [];
@@ -286,7 +313,8 @@ export default function LogTab({ db, setDb }) {
       .sort((a, b) => b.date.localeCompare(a.date))[0];
   }, [db.log, activeProgram?.id, day?.id, date]);
 
-  const editSet = (entryId, setIdx, patch) =>
+  const editSet = (entryId, setIdx, patch) => {
+    userTouchedRef.current = true;
     setWorking((w) => ({
       ...w,
       entries: w.entries.map((e) =>
@@ -298,14 +326,17 @@ export default function LogTab({ db, setDb }) {
           : e
       ),
     }));
+  };
 
-  const setRating = (entryId, rating) =>
+  const setRating = (entryId, rating) => {
+    userTouchedRef.current = true;
     setWorking((w) => ({
       ...w,
       entries: w.entries.map((e) =>
         e.id === entryId ? { ...e, rating: e.rating === rating ? null : rating } : e
       ),
     }));
+  };
 
   const [showPopup, setShowPopup] = useState(null);
   const [showCalc, setShowCalc] = useState(false);
@@ -469,6 +500,12 @@ export default function LogTab({ db, setDb }) {
                         return `${sets} × ${reps}`;
                       })()}
                     </div>
+                    {entry.suggestedFrom && (
+                      <div className="text-[10px] text-emerald-400/80 mt-1 flex items-center gap-1">
+                        <span className="h-1 w-1 rounded-full bg-emerald-400" />
+                        Suggested from {entry.suggestedFrom.date}: {entry.suggestedFrom.kg}kg
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button

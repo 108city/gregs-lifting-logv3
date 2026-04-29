@@ -136,4 +136,6 @@ generate_icons.mjs
 inspect_exercises.mjs
 inspect_programs.mjs
 upload_program.mjs
+inspect_today.mjs
+remove_today_phantoms.mjs
 supabase_backup_*.json
