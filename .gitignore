@@ -124,3 +124,10 @@ dist-ssr
 # OS
 .DS_Store
 Thumbs.db
+
+# Migration helpers (one-shot scripts) and local backups
+backup_supabase.cjs
+migrate_to_firebase.mjs
+verify_firebase.mjs
+check_supabase.cjs
+supabase_backup_*.json

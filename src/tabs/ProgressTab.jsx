@@ -14,7 +14,6 @@ import {
   Cell,
   Legend
 } from "recharts";
-import { supabase } from "../supabaseClient.js";
 
 /* ─────────── Utilities & compatibility ─────────── */
 function isoDate(d = new Date()) {

@@ -1,7 +1,7 @@
 // src/components/RecentWorkoutsCloud.jsx
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom";
-import { supabase } from "../supabaseClient.js";
+import { loadFromCloud } from "./syncService.js";
 
 /* ─────────── Shared helpers ─────────── */
 function toDate(val) {
@@ -340,29 +340,8 @@ export default function RecentWorkoutsCloud({ programs, db, setDb }) {
     let alive = true;
 
     async function fetchCloudLog() {
-      try {
-        const m = await import("../syncService.js");
-        if (m && typeof m.loadFromCloud === "function") {
-          const cloud = await m.loadFromCloud();
-          return Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
-        }
-      } catch {
-        /* fall through */
-      }
-      // Fallback: device row then main
-      const { data: dev } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "gregs-device")
-        .maybeSingle();
-      if (Array.isArray(dev?.data?.log)) return dev.data.log;
-
-      const { data: main } = await supabase
-        .from("lifting_logs")
-        .select("data")
-        .eq("id", "main")
-        .maybeSingle();
-      return Array.isArray(main?.data?.log) ? main.data.log : [];
+      const cloud = await loadFromCloud();
+      return Array.isArray(cloud?.data?.log) ? cloud.data.log : [];
     }
 
     (async () => {
