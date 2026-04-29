@@ -133,4 +133,7 @@ check_supabase.cjs
 inspect_recent.mjs
 remove_dummy.mjs
 generate_icons.mjs
+inspect_exercises.mjs
+inspect_programs.mjs
+upload_program.mjs
 supabase_backup_*.json

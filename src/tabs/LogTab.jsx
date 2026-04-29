@@ -493,9 +493,9 @@ export default function LogTab({ db, setDb }) {
                   {entry.sets.map((s, idx) => {
                     const prevSet = prevEntry?.sets?.[idx];
                     return (
-                      <div key={idx} className="grid grid-cols-[36px_1fr_1fr_auto] gap-2 sm:gap-3 items-center px-3 py-2.5">
+                      <div key={idx} className="grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-center px-2.5 py-2.5">
                         <div className="text-xs text-zinc-500 font-mono text-center">#{idx + 1}</div>
-                        <div className="flex flex-col gap-0.5">
+                        <div className="flex flex-col gap-0.5 min-w-0">
                           <span className="text-[10px] uppercase tracking-wider text-zinc-500">Reps</span>
                           <input
                             type="number"
@@ -503,10 +503,10 @@ export default function LogTab({ db, setDb }) {
                             inputMode="numeric"
                             value={String(s.reps)}
                             onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
-                            className="px-2.5 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
+                            className="w-full min-w-0 px-2 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
                           />
                         </div>
-                        <div className="flex flex-col gap-0.5">
+                        <div className="flex flex-col gap-0.5 min-w-0">
                           <span className="text-[10px] uppercase tracking-wider text-zinc-500">Weight (kg)</span>
                           <input
                             type="number"
@@ -515,12 +515,12 @@ export default function LogTab({ db, setDb }) {
                             inputMode="decimal"
                             value={String(s.kg)}
                             onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
-                            className="px-2.5 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
+                            className="w-full min-w-0 px-2 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
                           />
                         </div>
-                        <div className="text-[10px] text-zinc-500 leading-tight text-right whitespace-nowrap min-w-[64px]">
+                        <div className="text-[9px] text-zinc-500 leading-tight text-right whitespace-nowrap pl-1">
                           {prevSet
-                            ? <>Last<br/><span className="text-zinc-400">{prevSet.reps}×{prevSet.kg}kg</span></>
+                            ? <>Last<br/><span className="text-zinc-400 text-[10px] tabular-nums">{prevSet.reps}×{prevSet.kg}</span></>
                             : <span className="text-zinc-600">—</span>}
                         </div>
                       </div>
