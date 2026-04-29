@@ -81,20 +81,29 @@ function seedWorking(db, program, day, date) {
 
   // Cross-program fallback: for exercises that don't appear in lastSession,
   // pull the most recent top-set weight you've ever lifted on them.
-  const exerciseHistory = new Map(); // exerciseId -> { kg, date }
+  // Indexed by BOTH exerciseId and lowercased name so we tolerate id drift
+  // from old migrations (e.g. the same exercise existing under two ids).
+  const byId = new Map();   // exerciseId -> { kg, date }
+  const byName = new Map(); // normalized name -> { kg, date }
+  const norm = (s) => (s || "").toLowerCase().trim();
   for (const s of (db.log || [])) {
     if (s?.completed === false) continue;
     if (!s?.date || s.date >= date) continue;
     for (const e of (s.entries || [])) {
-      if (!e?.exerciseId) continue;
       const topKg = (e.sets || []).reduce(
         (m, x) => Math.max(m, Number(x?.kg || 0)),
         0
       );
       if (topKg <= 0) continue;
-      const prev = exerciseHistory.get(e.exerciseId);
-      if (!prev || s.date > prev.date) {
-        exerciseHistory.set(e.exerciseId, { kg: topKg, date: s.date });
+      const record = { kg: topKg, date: s.date };
+      if (e?.exerciseId != null) {
+        const prev = byId.get(e.exerciseId);
+        if (!prev || s.date > prev.date) byId.set(e.exerciseId, record);
+      }
+      const nKey = norm(e?.exerciseName);
+      if (nKey) {
+        const prev = byName.get(nKey);
+        if (!prev || s.date > prev.date) byName.set(nKey, record);
       }
     }
   }
@@ -108,7 +117,10 @@ function seedWorking(db, program, day, date) {
       const prevEntry = lastSession?.entries?.find(
         (e) => e.exerciseId === it.exerciseId
       );
-      const fallback = !prevEntry ? exerciseHistory.get(it.exerciseId) : null;
+      const fallback =
+        !prevEntry
+          ? byId.get(it.exerciseId) || byName.get(norm(it.name))
+          : null;
 
       const sets = Array.from(
         { length: clampInt(it.sets ?? 1, 1, 100) },
