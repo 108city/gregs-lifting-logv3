@@ -140,4 +140,5 @@ inspect_today.mjs
 remove_today_phantoms.mjs
 inspect_bench.mjs
 fix_bench_id.mjs
+upload_program_v2.mjs
 supabase_backup_*.json

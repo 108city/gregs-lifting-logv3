@@ -6,6 +6,7 @@ import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
 import { LogoBarbell } from "./components/LogoLab";
+import { useRestTimer, RestTimerOverlay, LetsGoFlash } from "./components/RestTimer";
 
 import { runMigrations } from "./migrations";
 
@@ -35,6 +36,10 @@ export default function App() {
   const [syncError, setSyncError] = useState("");
   const [syncId, setSyncId] = useState("gregs-device");
   const hasHydratedFromCloud = useRef(false);
+
+  // App-level rest timer — survives tab switches, persisted across reloads,
+  // notifies / sounds / vibrates when complete.
+  const restTimer = useRestTimer();
 
   useEffect(() => {
     let mounted = true;
@@ -96,7 +101,7 @@ export default function App() {
       <main className="mx-auto max-w-2xl px-4 pt-4 pb-24">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsContent value="log">
-            <LogTab db={db} setDb={setDb} />
+            <LogTab db={db} setDb={setDb} startRest={restTimer.startRest} />
           </TabsContent>
           <TabsContent value="progress">
             <ProgressTab db={db} setDb={setDb} />
@@ -116,6 +121,15 @@ export default function App() {
           </TabsList>
         </Tabs>
       </main>
+
+      {/* App-level rest timer overlay — visible on every tab */}
+      <RestTimerOverlay
+        timer={restTimer.timer}
+        onSkip={restTimer.skipRest}
+        onTogglePause={restTimer.togglePause}
+        onAdd={() => restTimer.addSeconds(30)}
+      />
+      {restTimer.letsGo && <LetsGoFlash />}
     </div>
   );
 }

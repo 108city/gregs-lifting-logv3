@@ -147,7 +147,7 @@ function seedWorking(db, program, day, date) {
   };
 }
 
-export default function LogTab({ db, setDb }) {
+export default function LogTab({ db, setDb, startRest = () => {} }) {
   const programs = db.programs || [];
   const activeProgram =
     programs.find((p) => p.id === db.activeProgramId) || programs[0] || null;
@@ -350,6 +350,9 @@ export default function LogTab({ db, setDb }) {
     }));
   };
 
+  // Rest timer is owned by App.jsx (so it survives tab switches and persists
+  // across reloads). `startRest` is passed in as a prop.
+
   const [showPopup, setShowPopup] = useState(null);
   const [showCalc, setShowCalc] = useState(false);
 
@@ -490,92 +493,152 @@ export default function LogTab({ db, setDb }) {
           message="Add exercises to this day from the Program tab."
         />
       ) : (
-        <div className="space-y-3">
-          {working.entries.map((entry) => {
-            const prevEntry = lastSession?.entries?.find(
-              (e) => e.exerciseId === entry.exerciseId
-            );
+        <div className="space-y-3 pb-2">
+          {groupEntriesForRender(working.entries, day.items).map((group) => {
+            const isSuperset = group.length > 1;
+            const groupRest = group[0].programmed?.rest || 0;
+            const groupKey = group.map((g) => g.entry.id).join(",");
+
+            const cardClass = isSuperset
+              ? "rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.03] overflow-hidden"
+              : "rounded-2xl border border-zinc-800 bg-zinc-900/60 overflow-hidden";
 
             return (
-              <div key={entry.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
-                <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <div className="font-semibold text-zinc-100 leading-tight">{entry.exerciseName}</div>
-                    <div className="text-[11px] text-zinc-500 mt-0.5">
-                      Target:{" "}
-                      {(() => {
-                        const programmed = day.items.find(
-                          (it) => it.exerciseId === entry.exerciseId
-                        );
-                        const sets = programmed?.sets ?? entry.sets?.length ?? 0;
-                        const reps = programmed?.reps ?? (entry.sets?.[0]?.reps ? Number(entry.sets[0].reps) : 0);
-                        return `${sets} × ${reps}`;
-                      })()}
+              <div key={groupKey} className={cardClass}>
+                {isSuperset && (
+                  <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2 border-b border-emerald-500/20 bg-emerald-500/[0.04]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-widest text-emerald-300 font-semibold">
+                        Superset
+                      </span>
+                      <span className="text-[11px] text-zinc-400">
+                        rest after both: {formatRest(groupRest)}
+                      </span>
                     </div>
-                    {entry.suggestedFrom && (
-                      <div className="text-[10px] text-emerald-400/80 mt-1 flex items-center gap-1">
-                        <span className="h-1 w-1 rounded-full bg-emerald-400" />
-                        Suggested from {entry.suggestedFrom.date}: {entry.suggestedFrom.kg}kg
-                      </div>
-                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      className={ratingChip(entry.rating === "easy", "easy")}
-                      onClick={() => setRating(entry.id, "easy")}
-                      title="Felt easy"
-                    >Easy</button>
-                    <button
-                      className={ratingChip(entry.rating === "moderate", "moderate")}
-                      onClick={() => setRating(entry.id, "moderate")}
-                      title="Felt okay"
-                    >Mod</button>
-                    <button
-                      className={ratingChip(entry.rating === "hard", "hard")}
-                      onClick={() => setRating(entry.id, "hard")}
-                      title="Felt hard"
-                    >Hard</button>
-                  </div>
-                </div>
+                )}
 
-                <div className="border-t border-zinc-800/80 divide-y divide-zinc-800/60">
-                  {entry.sets.map((s, idx) => {
-                    const prevSet = prevEntry?.sets?.[idx];
+                <div className={isSuperset ? "divide-y divide-emerald-500/15" : ""}>
+                  {group.map(({ entry, programmed }) => {
+                    const prevEntry = lastSession?.entries?.find(
+                      (e) => e.exerciseId === entry.exerciseId
+                    );
+                    const sets = programmed?.sets ?? entry.sets?.length ?? 0;
+                    const reps = programmed?.reps ?? (entry.sets?.[0]?.reps ? Number(entry.sets[0].reps) : 0);
                     return (
-                      <div key={idx} className="grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-center px-2.5 py-2.5">
-                        <div className="text-xs text-zinc-500 font-mono text-center">#{idx + 1}</div>
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Reps</span>
-                          <input
-                            type="number"
-                            min={0}
-                            inputMode="numeric"
-                            value={String(s.reps)}
-                            onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
-                            className="w-full min-w-0 px-2 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
-                          />
+                      <div key={entry.id}>
+                        <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3 flex-wrap">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-zinc-100 leading-tight flex items-center gap-2 flex-wrap">
+                              {entry.exerciseName}
+                              {programmed?.perSide && (
+                                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">
+                                  per side
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                              <span>Target: {sets} × {reps}{programmed?.perSide ? " each" : ""}</span>
+                              {!isSuperset && programmed?.rest > 0 && (
+                                <span className="inline-flex items-center gap-1 text-zinc-400">
+                                  <span className="h-1 w-1 rounded-full bg-zinc-600" />
+                                  Rest {formatRest(programmed.rest)}
+                                </span>
+                              )}
+                            </div>
+                            {entry.suggestedFrom && (
+                              <div className="text-[10px] text-emerald-400/80 mt-1 flex items-center gap-1">
+                                <span className="h-1 w-1 rounded-full bg-emerald-400" />
+                                Suggested from {entry.suggestedFrom.date}: {entry.suggestedFrom.kg}kg
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              className={ratingChip(entry.rating === "easy", "easy")}
+                              onClick={() => setRating(entry.id, "easy")}
+                              title="Felt easy"
+                            >Easy</button>
+                            <button
+                              className={ratingChip(entry.rating === "moderate", "moderate")}
+                              onClick={() => setRating(entry.id, "moderate")}
+                              title="Felt okay"
+                            >Mod</button>
+                            <button
+                              className={ratingChip(entry.rating === "hard", "hard")}
+                              onClick={() => setRating(entry.id, "hard")}
+                              title="Felt hard"
+                            >Hard</button>
+                          </div>
                         </div>
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Weight (kg)</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.5"
-                            inputMode="decimal"
-                            value={String(s.kg)}
-                            onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
-                            className="w-full min-w-0 px-2 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
-                          />
-                        </div>
-                        <div className="text-[9px] text-zinc-500 leading-tight text-right whitespace-nowrap pl-1">
-                          {prevSet
-                            ? <>Last<br/><span className="text-zinc-400 text-[10px] tabular-nums">{prevSet.reps}×{prevSet.kg}</span></>
-                            : <span className="text-zinc-600">—</span>}
+
+                        <div className="border-t border-zinc-800/80 divide-y divide-zinc-800/60">
+                          {entry.sets.map((s, idx) => {
+                            const prevSet = prevEntry?.sets?.[idx];
+                            return (
+                              <div key={idx} className="grid grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-center px-2.5 py-2.5">
+                                <div className="text-xs text-zinc-500 font-mono text-center">#{idx + 1}</div>
+                                <div className="flex flex-col gap-0.5 min-w-0">
+                                  <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                    Reps{programmed?.perSide ? " ea" : ""}
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    inputMode="numeric"
+                                    value={String(s.reps)}
+                                    onChange={(e) => editSet(entry.id, idx, { reps: e.target.value })}
+                                    className="w-full min-w-0 px-2 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-0.5 min-w-0">
+                                  <span className="text-[10px] uppercase tracking-wider text-zinc-500">Weight (kg)</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="0.5"
+                                    inputMode="decimal"
+                                    value={String(s.kg)}
+                                    onChange={(e) => editSet(entry.id, idx, { kg: e.target.value })}
+                                    className="w-full min-w-0 px-2 py-2 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition text-sm"
+                                  />
+                                </div>
+                                <div className="text-[9px] text-zinc-500 leading-tight text-right whitespace-nowrap pl-1">
+                                  {prevSet
+                                    ? <>Last<br/><span className="text-zinc-400 text-[10px] tabular-nums">{prevSet.reps}×{prevSet.kg}</span></>
+                                    : <span className="text-zinc-600">—</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
                   })}
                 </div>
+
+                {/* Rest button at bottom of group/exercise card */}
+                {groupRest > 0 && (
+                  <div className="px-3 py-2.5 border-t border-zinc-800/60 bg-zinc-950/40 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-zinc-500">
+                      {isSuperset
+                        ? "After completing one round of both:"
+                        : "After this set:"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => startRest(groupRest, isSuperset ? "Superset rest" : group[0].entry.exerciseName)}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="13" r="8" />
+                        <path d="M12 9v4l2 2" />
+                        <path d="M9 2h6" />
+                      </svg>
+                      Rest {formatRest(groupRest)}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -591,8 +654,37 @@ export default function LogTab({ db, setDb }) {
           </div>
         </div>
       )}
+
     </div>
   );
+}
+
+/* ─────── helpers + sub-components ─────── */
+
+function formatRest(seconds) {
+  if (!seconds) return "—";
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60} min`;
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${seconds}s`;
+}
+
+// Group consecutive entries that share a supersetGroupId.
+function groupEntriesForRender(entries, dayItems) {
+  const groups = [];
+  let current = null;
+  for (const entry of entries) {
+    const programmed = dayItems.find((it) => it.exerciseId === entry.exerciseId) || null;
+    const groupId = programmed?.supersetGroupId || null;
+    const item = { entry, programmed };
+
+    if (groupId && current && current.groupId === groupId) {
+      current.items.push(item);
+    } else {
+      current = { groupId, items: [item] };
+      groups.push(current);
+    }
+  }
+  return groups.map((g) => g.items);
 }
 
 function SaveIndicator({ lastAutoSavedAt, tick }) {
@@ -627,3 +719,4 @@ function EmptyState({ icon, title, message }) {
     </div>
   );
 }
+
