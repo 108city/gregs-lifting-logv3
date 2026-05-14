@@ -71,6 +71,8 @@ typings/
 
 # dotenv environment variables file
 .env
+.env.local
+.env.*.local
 .env.test
 .env.production
 
@@ -141,4 +143,9 @@ remove_today_phantoms.mjs
 inspect_bench.mjs
 fix_bench_id.mjs
 upload_program_v2.mjs
+inspect_unknown_sets.mjs
+inspect_orphans.mjs
+dump_unknown_workouts.mjs
+remove_orphans.mjs
+inspect_plan.mjs
 supabase_backup_*.json

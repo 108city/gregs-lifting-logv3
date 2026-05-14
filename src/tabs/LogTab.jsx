@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import PlateCalculator from "@/components/PlateCalculator";
+import { pushToInbody, buildExerciseIndex } from "@/lib/inbodyWebhook";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const genId = () =>
@@ -311,6 +312,17 @@ export default function LogTab({ db, setDb, startRest = () => {} }) {
       setWorking((w) => ({ ...w, sessionId: id }));
     }
     setLastAutoSavedAt(Date.now());
+
+    // Fire-and-forget mirror to the InBody Dashboard. Never await; never block.
+    try {
+      pushToInbody(normalized, {
+        exercisesById: buildExerciseIndex(currentDb.exercises),
+        programName: activeProgram?.name || null,
+        dayName: day?.name || null,
+      });
+    } catch (e) {
+      console.warn("[inbody] push wrapper error", e);
+    }
   };
 
   const lastSession = useMemo(() => {

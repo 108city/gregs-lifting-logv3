@@ -5,6 +5,7 @@ import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
 import ProgramTab from "./tabs/ProgramTab";
 import ExercisesTab from "./tabs/ExercisesTab";
+import ScheduleTab from "./tabs/ScheduleTab";
 import { LogoBarbell } from "./components/LogoLab";
 import { useRestTimer, RestTimerOverlay, LetsGoFlash } from "./components/RestTimer";
 
@@ -14,6 +15,7 @@ const STORAGE_KEY = "gregs-lifting-log";
 
 const TAB_TITLES = {
   log: "Today's Workout",
+  schedule: "Schedule",
   progress: "Progress",
   program: "Programs",
   exercises: "Exercises",
@@ -101,7 +103,14 @@ export default function App() {
       <main className="mx-auto max-w-2xl px-4 pt-4 pb-24">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsContent value="log">
-            <LogTab db={db} setDb={setDb} startRest={restTimer.startRest} />
+            <LogTab
+              db={db}
+              setDb={setDb}
+              startRest={restTimer.startRest}
+            />
+          </TabsContent>
+          <TabsContent value="schedule">
+            <ScheduleTab db={db} setDb={setDb} />
           </TabsContent>
           <TabsContent value="progress">
             <ProgressTab db={db} setDb={setDb} />
@@ -115,6 +124,7 @@ export default function App() {
 
           <TabsList>
             <TabsTrigger value="log">Log</TabsTrigger>
+            <TabsTrigger value="schedule">Schedule</TabsTrigger>
             <TabsTrigger value="progress">Progress</TabsTrigger>
             <TabsTrigger value="program">Program</TabsTrigger>
             <TabsTrigger value="exercises">Exercises</TabsTrigger>
