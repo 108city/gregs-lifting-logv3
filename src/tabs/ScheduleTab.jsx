@@ -20,11 +20,28 @@ export default function ScheduleTab({ db, setDb }) {
   const loadPlan = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const res = await fetch(PLAN_FETCH_URL, {
+      // Fetch 4 weeks back + 2 weeks ahead so streak can walk through history.
+      // We only *display* today + future; the rest of the response feeds
+      // computeStreak so prior completions count properly.
+      const from = new Date();
+      from.setUTCDate(from.getUTCDate() - 28);
+      const to = new Date();
+      to.setUTCDate(to.getUTCDate() + 14);
+      const qs = new URLSearchParams({
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
+      });
+      const res = await fetch(`${PLAN_FETCH_URL}?${qs.toString()}`, {
         signal: AbortSignal.timeout(15_000),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      if (!res.ok) {
+        // Surface the upstream message when the proxy includes one (proxy
+        // returns { error, message } on caught exceptions). Falls back to
+        // the generic error or status code.
+        const detail = [json?.error, json?.message].filter(Boolean).join(" — ");
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
       setState({ loading: false, error: null, data: json });
     } catch (e) {
       setState({ loading: false, error: e?.message || String(e), data: null });
@@ -42,10 +59,19 @@ export default function ScheduleTab({ db, setDb }) {
   }, [loadPlan]);
 
   const data = state.data;
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  // Full chronological list (past + today + future) — needed for streak.
   const workouts = useMemo(() => {
     const list = Array.isArray(data?.workouts) ? [...data.workouts] : [];
     return list.sort((a, b) => (a.scheduled_date || "").localeCompare(b.scheduled_date || ""));
   }, [data]);
+
+  // Visible list — only today and upcoming days.
+  const displayWorkouts = useMemo(
+    () => workouts.filter((w) => !w.scheduled_date || w.scheduled_date >= todayIso),
+    [workouts, todayIso]
+  );
 
   const localTicks = db?.planTicks || {};
   const isLocallyTicked = (w) => !!localTicks[w?.id];
@@ -61,7 +87,6 @@ export default function ScheduleTab({ db, setDb }) {
   }, [workouts, JSON.stringify(localTicks)]);
 
   const activePlan = data?.active_plan;
-  const todayIso = new Date().toISOString().slice(0, 10);
 
   const handleToggleTick = (workout) => {
     if (!workout?.id) return;
@@ -126,7 +151,7 @@ export default function ScheduleTab({ db, setDb }) {
         <SkeletonRows />
       ) : state.error ? (
         <ErrorCard message={state.error} onRetry={loadPlan} />
-      ) : workouts.length === 0 ? (
+      ) : displayWorkouts.length === 0 ? (
         <EmptyState
           icon="📅"
           title="Nothing scheduled"
@@ -134,7 +159,7 @@ export default function ScheduleTab({ db, setDb }) {
         />
       ) : (
         <ul className="rounded-2xl border border-zinc-800 bg-zinc-900/60 divide-y divide-zinc-800/80 overflow-hidden">
-          {workouts.map((w) => (
+          {displayWorkouts.map((w) => (
             <ScheduleRow
               key={w.id || `${w.scheduled_date}-${w.name}`}
               workout={w}
