@@ -1,8 +1,30 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import confetti from "canvas-confetti";
 import { computeStreak } from "@/lib/planMapping";
 
 const PLAN_FETCH_URL = "/api/plan-upcoming";
+const CACHE_KEY = "lifting-log:plan-cache";
+const REFETCH_ON_FOCUS_MIN_AGE_MS = 60_000; // don't refetch on focus more than once a minute
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data) return null;
+    return parsed; // { data, cachedAt }
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, cachedAt: Date.now() }));
+  } catch {
+    /* quota or disabled — fine */
+  }
+}
 
 /**
  * Simple, single-line-per-day schedule.
@@ -15,10 +37,24 @@ const PLAN_FETCH_URL = "/api/plan-upcoming";
  *      manual completion writes today. Local-only; stays in this app.
  */
 export default function ScheduleTab({ db, setDb }) {
-  const [state, setState] = useState({ loading: true, error: null, data: null });
+  // Hydrate from localStorage cache immediately so the tab feels instant.
+  const [state, setState] = useState(() => {
+    const cached = readCache();
+    if (cached?.data) {
+      return { loading: false, refreshing: false, error: null, data: cached.data };
+    }
+    return { loading: true, refreshing: false, error: null, data: null };
+  });
+  const lastFetchedAtRef = useRef(readCache()?.cachedAt || 0);
 
-  const loadPlan = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
+  const loadPlan = useCallback(async ({ background = false } = {}) => {
+    setState((s) => ({
+      ...s,
+      // Only show the full skeleton if we have nothing to display.
+      loading: !background && !s.data,
+      refreshing: !!s.data || background,
+      error: null,
+    }));
     try {
       // Fetch 4 weeks back + 2 weeks ahead so streak can walk through history.
       // We only *display* today + future; the rest of the response feeds
@@ -42,18 +78,35 @@ export default function ScheduleTab({ db, setDb }) {
         const detail = [json?.error, json?.message].filter(Boolean).join(" — ");
         throw new Error(detail || `HTTP ${res.status}`);
       }
-      setState({ loading: false, error: null, data: json });
+      writeCache(json);
+      lastFetchedAtRef.current = Date.now();
+      setState({ loading: false, refreshing: false, error: null, data: json });
     } catch (e) {
-      setState({ loading: false, error: e?.message || String(e), data: null });
+      setState((s) => ({
+        ...s,
+        loading: false,
+        refreshing: false,
+        // Keep showing stale data on error — don't blow away the cache.
+        error: e?.message || String(e),
+      }));
     }
   }, []);
 
-  useEffect(() => { loadPlan(); }, [loadPlan]);
-
-  // Refetch when the tab becomes visible — catches BodyOS auto-completions
-  // that just happened in the Log tab (lift workouts via webhook → date match).
+  // First load: kick a fetch. If we hydrated from cache, this runs as a
+  // background refresh (no skeleton); otherwise as the initial load.
   useEffect(() => {
-    function onVis() { if (!document.hidden) loadPlan(); }
+    loadPlan({ background: !!state.data });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadPlan]);
+
+  // Refetch when the tab becomes visible again, but throttle — if we
+  // refetched less than a minute ago, skip. Plan data changes maybe once a day.
+  useEffect(() => {
+    function onVis() {
+      if (document.hidden) return;
+      if (Date.now() - lastFetchedAtRef.current < REFETCH_ON_FOCUS_MIN_AGE_MS) return;
+      loadPlan({ background: true });
+    }
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loadPlan]);
@@ -136,9 +189,10 @@ export default function ScheduleTab({ db, setDb }) {
             <StreakBadge streak={streak} />
             <button
               type="button"
-              onClick={loadPlan}
-              className="text-[11px] uppercase tracking-wider px-2.5 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 hover:bg-zinc-700 transition border border-zinc-700"
-              title="Refresh"
+              onClick={() => loadPlan({ background: true })}
+              disabled={state.refreshing || state.loading}
+              className={`text-[11px] uppercase tracking-wider px-2.5 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 hover:bg-zinc-700 transition border border-zinc-700 ${state.refreshing ? "animate-spin" : ""}`}
+              title={state.refreshing ? "Refreshing…" : "Refresh"}
             >
               ↻
             </button>
@@ -147,10 +201,17 @@ export default function ScheduleTab({ db, setDb }) {
       </div>
 
       {/* List */}
+      {state.error && state.data && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2 text-[11px] text-amber-300/90 flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+          Showing cached data — refresh failed: {state.error}
+        </div>
+      )}
+
       {state.loading ? (
         <SkeletonRows />
-      ) : state.error ? (
-        <ErrorCard message={state.error} onRetry={loadPlan} />
+      ) : state.error && !state.data ? (
+        <ErrorCard message={state.error} onRetry={() => loadPlan()} />
       ) : displayWorkouts.length === 0 ? (
         <EmptyState
           icon="📅"
