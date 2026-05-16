@@ -115,10 +115,31 @@ export default function ScheduleTab({ db, setDb }) {
   const todayIso = new Date().toISOString().slice(0, 10);
 
   // Full chronological list (past + today + future) — needed for streak.
+  // Merges BodyOS workouts with locally-managed db.schedule entries so the
+  // lifting log can extend the schedule beyond BodyOS's active plan window.
   const workouts = useMemo(() => {
-    const list = Array.isArray(data?.workouts) ? [...data.workouts] : [];
-    return list.sort((a, b) => (a.scheduled_date || "").localeCompare(b.scheduled_date || ""));
-  }, [data]);
+    const fromBodyOS = Array.isArray(data?.workouts)
+      ? data.workouts.map((w) => ({ ...w, _source: "bodyos" }))
+      : [];
+    const seenDates = new Set(fromBodyOS.map((w) => w.scheduled_date));
+    const fromLocal = (db?.schedule || [])
+      .filter((e) => e?.date && !seenDates.has(e.date))
+      .map((e) => ({
+        id: e.id,
+        scheduled_date: e.date,
+        name: e.name || "Workout",
+        focus: null,
+        summary: e.notes || null,
+        plan: { type: e.type || "other", notes: e.notes || null },
+        status: "planned",
+        completed_at: null,
+        _source: "local",
+        _blockName: e.blockName || null,
+      }));
+    return [...fromBodyOS, ...fromLocal].sort(
+      (a, b) => (a.scheduled_date || "").localeCompare(b.scheduled_date || "")
+    );
+  }, [data, db?.schedule]);
 
   // Visible list — only today and upcoming days.
   const displayWorkouts = useMemo(
@@ -208,9 +229,9 @@ export default function ScheduleTab({ db, setDb }) {
         </div>
       )}
 
-      {state.loading ? (
+      {state.loading && displayWorkouts.length === 0 ? (
         <SkeletonRows />
-      ) : state.error && !state.data ? (
+      ) : state.error && !state.data && displayWorkouts.length === 0 ? (
         <ErrorCard message={state.error} onRetry={() => loadPlan()} />
       ) : displayWorkouts.length === 0 ? (
         <EmptyState
