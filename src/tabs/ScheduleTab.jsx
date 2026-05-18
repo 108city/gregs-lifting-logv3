@@ -141,15 +141,38 @@ export default function ScheduleTab({ db, setDb }) {
     );
   }, [data, db?.schedule]);
 
-  // Visible list — only today and upcoming days.
-  const displayWorkouts = useMemo(
-    () => workouts.filter((w) => !w.scheduled_date || w.scheduled_date >= todayIso),
-    [workouts, todayIso]
-  );
+  // "Show past" toggle — by default we only render today + future, but the
+  // user can opt in to see the past 14 days so they can tick anything they
+  // forgot to log.
+  const [showPast, setShowPast] = useState(false);
+  const pastWindowStart = useMemo(() => {
+    const d = new Date(todayIso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 14);
+    return d.toISOString().slice(0, 10);
+  }, [todayIso]);
 
   const localTicks = db?.planTicks || {};
   const isLocallyTicked = (w) => !!localTicks[w?.id];
   const isCompletedEffective = (w) => w?.status === "completed" || isLocallyTicked(w);
+
+  // Visible list — today + future, plus optionally the last 14 days.
+  const displayWorkouts = useMemo(() => {
+    const minDate = showPast ? pastWindowStart : todayIso;
+    return workouts.filter((w) => !w.scheduled_date || w.scheduled_date >= minDate);
+  }, [workouts, todayIso, pastWindowStart, showPast]);
+
+  // Count of un-ticked past days within the past-14-day window — surfaces
+  // catch-up work in the toggle button label.
+  const pastUntickedCount = useMemo(() => {
+    return workouts.filter(
+      (w) =>
+        w.scheduled_date &&
+        w.scheduled_date < todayIso &&
+        w.scheduled_date >= pastWindowStart &&
+        !isCompletedEffective(w)
+    ).length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workouts, todayIso, pastWindowStart, JSON.stringify(localTicks)]);
 
   const streak = useMemo(() => {
     // Stitch local ticks into the workouts list for streak calc so manual ticks count.
@@ -228,6 +251,29 @@ export default function ScheduleTab({ db, setDb }) {
           Showing cached data — refresh failed: {state.error}
         </div>
       )}
+
+      {/* Past-days toggle */}
+      <div className="flex items-center justify-center">
+        <button
+          type="button"
+          onClick={() => setShowPast((v) => !v)}
+          className={`text-[11px] uppercase tracking-wider px-3 py-1.5 rounded-full border transition flex items-center gap-2 ${
+            showPast
+              ? "bg-zinc-800 text-zinc-200 border-zinc-700"
+              : "bg-zinc-900/60 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:border-zinc-700"
+          }`}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={showPast ? "rotate-180 transition-transform" : "transition-transform"}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+          {showPast ? "Hide past days" : "Show past days"}
+          {!showPast && pastUntickedCount > 0 && (
+            <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[9px] tabular-nums font-semibold">
+              {pastUntickedCount} unlogged
+            </span>
+          )}
+        </button>
+      </div>
 
       {state.loading && displayWorkouts.length === 0 ? (
         <SkeletonRows />
