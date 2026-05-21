@@ -242,10 +242,11 @@ export default function ScheduleTab({ db, setDb }) {
               type="button"
               onClick={() => loadPlan({ background: true })}
               disabled={state.refreshing || state.loading}
-              className={`text-[11px] uppercase tracking-wider px-2.5 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 hover:bg-zinc-700 transition border border-zinc-700 ${state.refreshing ? "animate-spin" : ""}`}
+              aria-label={state.refreshing ? "Refreshing" : "Refresh"}
+              className="text-[11px] px-2.5 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition border border-zinc-700 disabled:opacity-50 disabled:cursor-default"
               title={state.refreshing ? "Refreshing…" : "Refresh"}
             >
-              ↻
+              <span className={`inline-block ${state.refreshing ? "animate-spin" : ""}`}>↻</span>
             </button>
           </div>
         </div>
