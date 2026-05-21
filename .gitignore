@@ -152,4 +152,8 @@ inspect_day3.mjs
 update_day3_and_schedule.mjs
 tick_yesterday.mjs
 update_schedule_v2.mjs
+inspect_recent_log.mjs
+migrate_ticks.mjs
+repush_15may.mjs
+push_ticks_to_bodyos.mjs
 supabase_backup_*.json

@@ -195,18 +195,16 @@ export default function ScheduleTab({ db, setDb }) {
   const handleToggleTick = (workout) => {
     if (!workout?.id) return;
     const id = workout.id;
-    const wasTicked = isLocallyTicked(workout) || workout.status === "completed";
+    const wasLocallyTicked = !!localTicks[id];
+    const wasCompletedUpstream = workout.status === "completed";
+
+    // Compute the new local-tick state and apply optimistically.
     const nextTicks = { ...localTicks };
-    if (wasTicked && !nextTicks[id]) {
-      // It's BodyOS-completed but not locally ticked — tapping is a no-op
-      // (you can't un-complete a BodyOS row from here). Just bail.
-      return;
-    }
-    if (nextTicks[id]) {
+    const willTick = !wasLocallyTicked && !wasCompletedUpstream;
+    if (wasLocallyTicked) {
       delete nextTicks[id];
-    } else {
+    } else if (willTick) {
       nextTicks[id] = { tickedAt: new Date().toISOString() };
-      // Tick fired — celebrate.
       try {
         confetti({
           particleCount: 90,
@@ -216,8 +214,53 @@ export default function ScheduleTab({ db, setDb }) {
           ticks: 200,
         });
       } catch { /* ignore */ }
+    } else {
+      // Already completed upstream, not locally ticked — no-op.
+      return;
     }
     setDb({ ...db, planTicks: nextTicks });
+
+    // Try to mirror to BodyOS in the background. On failure, revert the
+    // local tick state so the UI doesn't claim ✓ that BodyOS doesn't know about.
+    const isLocalOnlyEntry = workout._source === "local";
+    if (isLocalOnlyEntry) {
+      // Local-only entries (from db.schedule, no BodyOS counterpart) don't
+      // sync — there's nothing to update on the BodyOS side.
+      return;
+    }
+    const action = wasLocallyTicked ? "untick" : "complete";
+    fetch("/api/plan-tick", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        external_id: id,
+        action,
+        ...(action === "complete" ? { completed_at: nextTicks[id]?.tickedAt } : {}),
+      }),
+      signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout
+        ? AbortSignal.timeout(10_000)
+        : undefined,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${text.slice(0, 200)}`);
+        }
+      })
+      .catch((e) => {
+        console.warn("[plan-tick] sync failed; reverting local tick", e);
+        // Revert the optimistic update.
+        setDb((cur) => {
+          const cur_ticks = cur?.planTicks || {};
+          const rolled = { ...cur_ticks };
+          if (wasLocallyTicked) {
+            rolled[id] = { tickedAt: new Date().toISOString() };
+          } else {
+            delete rolled[id];
+          }
+          return { ...cur, planTicks: rolled };
+        });
+      });
   };
 
   return (
