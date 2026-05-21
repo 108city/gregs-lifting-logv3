@@ -115,16 +115,15 @@ export default function ScheduleTab({ db, setDb }) {
   const todayIso = new Date().toISOString().slice(0, 10);
 
   // Full chronological list (past + today + future) — needed for streak.
-  // Merges BodyOS workouts with locally-managed db.schedule entries so the
-  // lifting log can extend the schedule beyond BodyOS's active plan window.
+  // Merges locally-managed db.schedule entries with BodyOS workouts.
+  // Local entries WIN on date conflicts — the lifting log is the source of
+  // truth for the user's schedule; BodyOS is treated as fallback for dates
+  // the user hasn't explicitly scheduled locally.
   const workouts = useMemo(() => {
-    const fromBodyOS = Array.isArray(data?.workouts)
-      ? data.workouts.map((w) => ({ ...w, _source: "bodyos" }))
-      : [];
-    const seenDates = new Set(fromBodyOS.map((w) => w.scheduled_date));
-    const fromLocal = (db?.schedule || [])
-      .filter((e) => e?.date && !seenDates.has(e.date))
-      .map((e) => ({
+    const localByDate = new Map();
+    for (const e of (db?.schedule || [])) {
+      if (!e?.date) continue;
+      localByDate.set(e.date, {
         id: e.id,
         scheduled_date: e.date,
         name: e.name || "Workout",
@@ -135,8 +134,16 @@ export default function ScheduleTab({ db, setDb }) {
         completed_at: null,
         _source: "local",
         _blockName: e.blockName || null,
-      }));
-    return [...fromBodyOS, ...fromLocal].sort(
+      });
+    }
+    const fromBodyOS = Array.isArray(data?.workouts) ? data.workouts : [];
+    const merged = [...localByDate.values()];
+    for (const w of fromBodyOS) {
+      if (!localByDate.has(w.scheduled_date)) {
+        merged.push({ ...w, _source: "bodyos" });
+      }
+    }
+    return merged.sort(
       (a, b) => (a.scheduled_date || "").localeCompare(b.scheduled_date || "")
     );
   }, [data, db?.schedule]);
@@ -436,16 +443,19 @@ const TYPE_ICON = {
   run:  "🏃",
   hiit: "⚡",
   rest: "😌",
+  walk: "🚶",
   other: "·",
 };
 
 function inferType(w) {
   const t = w?.plan?.type;
-  if (t === "lift" || t === "run" || t === "hiit" || t === "rest") return t;
+  if (["lift", "run", "hiit", "rest", "walk"].includes(t)) return t;
   if (Array.isArray(w?.plan?.exercises) && w.plan.exercises.length > 0) return "lift";
-  if (/run/i.test(w?.name || "")) return "run";
-  if (/hiit|class/i.test(w?.name || "")) return "hiit";
-  if (/rest/i.test(w?.name || "")) return "rest";
+  const n = (w?.name || "").toLowerCase();
+  if (/run/.test(n)) return "run";
+  if (/hiit|class/.test(n)) return "hiit";
+  if (/walk/.test(n)) return "walk";
+  if (/rest/.test(n)) return "rest";
   return "other";
 }
 

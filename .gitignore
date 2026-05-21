@@ -151,4 +151,5 @@ inspect_plan.mjs
 inspect_day3.mjs
 update_day3_and_schedule.mjs
 tick_yesterday.mjs
+update_schedule_v2.mjs
 supabase_backup_*.json
