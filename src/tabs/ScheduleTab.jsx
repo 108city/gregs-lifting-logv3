@@ -236,18 +236,8 @@ export default function ScheduleTab({ db, setDb }) {
               <div className="text-[11px] text-zinc-400 mt-0.5 line-clamp-2">{activePlan.focus}</div>
             )}
           </div>
-          <div className="shrink-0 flex items-center gap-2">
+          <div className="shrink-0">
             <StreakBadge streak={streak} />
-            <button
-              type="button"
-              onClick={() => loadPlan({ background: true })}
-              disabled={state.refreshing || state.loading}
-              aria-label={state.refreshing ? "Refreshing" : "Refresh"}
-              className="text-[11px] px-2.5 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition border border-zinc-700 disabled:opacity-50 disabled:cursor-default"
-              title={state.refreshing ? "Refreshing…" : "Refresh"}
-            >
-              <span className={`inline-block ${state.refreshing ? "animate-spin" : ""}`}>↻</span>
-            </button>
           </div>
         </div>
       </div>
