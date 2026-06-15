@@ -74,36 +74,63 @@ export function buildSyntheticProgramFromPlan(planWorkout, exercises = []) {
   };
 }
 
-/** Compute a streak count: walk back from today through the workouts list. */
+// Classify a day for streak purposes.
+//   "kept"   → completed session OR a rest day (counts, doesn't break)
+//   "missed" → a non-rest planned day that wasn't done, or status "missed"
+//   "none"   → no entry at all (neutral gap, doesn't break, doesn't count)
+function classifyDay(entry) {
+  if (!entry) return "none";
+  const type = entry._type || entry.plan?.type || null;
+  if (entry.status === "completed") return "kept";
+  if (entry.status === "missed" || entry.status === "skipped") return "missed";
+  if (type === "rest") return "kept"; // rest day — counts toward the streak
+  // any other planned-but-not-completed day in the past is a miss
+  return "missed";
+}
+
+/** Current streak: walk back from today until a missed day. */
 export function computeStreak(workouts, today = new Date()) {
   if (!Array.isArray(workouts) || workouts.length === 0) return 0;
   const todayUtc = isoDate(today);
-  // Index by date; only `completed` counts as a kept day; `planned` past = miss.
   const byDate = new Map();
   for (const w of workouts) {
     if (!w?.scheduled_date) continue;
-    byDate.set(w.scheduled_date, w.status);
+    byDate.set(w.scheduled_date, w);
   }
   let streak = 0;
   for (let i = 0; i < 365; i++) {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
     const iso = isoDate(d);
-    const status = byDate.get(iso);
+    const klass = classifyDay(byDate.get(iso));
     if (iso === todayUtc) {
-      // Today doesn't break the streak whether or not you've done it yet.
-      if (status === "completed") streak++;
+      // Today never breaks the streak (it isn't over yet); only counts if kept.
+      if (klass === "kept") streak++;
       continue;
     }
-    if (status === "completed") {
-      streak++;
-    } else if (status === "planned" || status === "skipped") {
-      // a missed planned day breaks the streak
-      break;
-    }
-    // no entry for that date = rest day → don't break, don't increment
+    if (klass === "kept") streak++;
+    else if (klass === "missed") break;
+    // "none" = neutral gap → carry on without breaking or counting
   }
   return streak;
+}
+
+/** Longest streak across all available history (ending on/before today). */
+export function computeLongestStreak(workouts, today = new Date()) {
+  if (!Array.isArray(workouts) || workouts.length === 0) return 0;
+  const todayUtc = isoDate(today);
+  // Only consider dated entries up to and including today, in date order.
+  const entries = workouts
+    .filter((w) => w?.scheduled_date && w.scheduled_date <= todayUtc)
+    .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
+  let longest = 0, run = 0;
+  for (const e of entries) {
+    const klass = classifyDay(e);
+    if (klass === "kept") { run++; if (run > longest) longest = run; }
+    else if (klass === "missed") { run = 0; }
+    // "none" → ignore, neither extend nor break
+  }
+  return longest;
 }
 
 /* ─────────── helpers ─────────── */

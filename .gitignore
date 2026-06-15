@@ -157,3 +157,12 @@ migrate_ticks.mjs
 repush_15may.mjs
 push_ticks_to_bodyos.mjs
 supabase_backup_*.json
+
+mark_11_12_jun.mjs
+restore_runs.mjs
+prune_schedule_overlap.mjs
+update_schedule_v3.mjs
+update_schedule_v4.mjs
+update_schedule_v5.mjs
+update_schedule_v6.mjs
+inspect_recent_log.mjs

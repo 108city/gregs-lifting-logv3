@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import confetti from "canvas-confetti";
-import { computeStreak } from "@/lib/planMapping";
+import { computeStreak, computeLongestStreak } from "@/lib/planMapping";
 
 const PLAN_FETCH_URL = "/api/plan-upcoming";
 const CACHE_KEY = "lifting-log:plan-cache";
@@ -130,9 +130,12 @@ export default function ScheduleTab({ db, setDb }) {
         focus: null,
         summary: e.notes || null,
         plan: { type: e.type || "other", notes: e.notes || null },
-        status: "planned",
+        // Carry an explicit status if the entry has one (e.g. "missed"),
+        // otherwise it's a normal planned day.
+        status: e.status || "planned",
         completed_at: null,
         _source: "local",
+        _type: e.type || "other",
         _blockName: e.blockName || null,
       });
     }
@@ -140,7 +143,7 @@ export default function ScheduleTab({ db, setDb }) {
     const merged = [...localByDate.values()];
     for (const w of fromBodyOS) {
       if (!localByDate.has(w.scheduled_date)) {
-        merged.push({ ...w, _source: "bodyos" });
+        merged.push({ ...w, _source: "bodyos", _type: w.plan?.type || "other" });
       }
     }
     return merged.sort(
@@ -181,12 +184,15 @@ export default function ScheduleTab({ db, setDb }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workouts, todayIso, pastWindowStart, JSON.stringify(localTicks)]);
 
-  const streak = useMemo(() => {
-    // Stitch local ticks into the workouts list for streak calc so manual ticks count.
+  const { streak, longestStreak } = useMemo(() => {
+    // Stitch local ticks into the workouts list so manual ticks count as completed.
     const stitched = workouts.map((w) =>
       isCompletedEffective(w) ? { ...w, status: "completed" } : w
     );
-    return computeStreak(stitched);
+    return {
+      streak: computeStreak(stitched),
+      longestStreak: computeLongestStreak(stitched),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workouts, JSON.stringify(localTicks)]);
 
@@ -280,7 +286,7 @@ export default function ScheduleTab({ db, setDb }) {
             )}
           </div>
           <div className="shrink-0">
-            <StreakBadge streak={streak} />
+            <StreakBadge streak={streak} longestStreak={longestStreak} />
           </div>
         </div>
       </div>
@@ -355,6 +361,7 @@ function ScheduleRow({ workout, todayIso, isTicked, tickedByBodyOS, onToggle }) 
   const type = inferType(workout);
   const dayLabel = formatDayLabel(date);
   const desc = describeWorkout(workout, type);
+  const isMissed = workout.status === "missed" && !isTicked;
 
   return (
     <li className={`flex items-center gap-3 px-4 py-3 transition ${isToday ? "bg-emerald-500/[0.04]" : ""}`}>
@@ -368,18 +375,29 @@ function ScheduleRow({ workout, todayIso, isTicked, tickedByBodyOS, onToggle }) 
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className={`text-sm leading-snug ${isTicked ? "text-zinc-500 line-through" : isPast ? "text-zinc-500" : "text-zinc-100"}`}>
-          <span className="mr-1">{TYPE_ICON[type] || "·"}</span>
-          {desc}
+        <div className={`text-sm leading-snug flex items-center gap-2 ${isTicked ? "text-zinc-500 line-through" : isMissed ? "text-zinc-500" : isPast ? "text-zinc-500" : "text-zinc-100"}`}>
+          <span>{TYPE_ICON[type] || "·"}</span>
+          <span className={isMissed ? "line-through" : ""}>{desc}</span>
+          {isMissed && (
+            <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/40 font-semibold no-underline">
+              Missed
+            </span>
+          )}
         </div>
       </div>
 
-      <TickButton
-        ticked={isTicked}
-        disabled={tickedByBodyOS}
-        onClick={onToggle}
-        ariaLabel={isTicked ? "Untick" : "Mark done"}
-      />
+      {isMissed ? (
+        <span className="h-9 w-9 rounded-full flex items-center justify-center text-red-400/60" aria-label="Missed">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </span>
+      ) : (
+        <TickButton
+          ticked={isTicked}
+          disabled={tickedByBodyOS}
+          onClick={onToggle}
+          ariaLabel={isTicked ? "Untick" : "Mark done"}
+        />
+      )}
     </li>
   );
 }
@@ -404,23 +422,36 @@ function TickButton({ ticked, disabled, onClick, ariaLabel }) {
   );
 }
 
-function StreakBadge({ streak }) {
-  if (!streak || streak <= 0) {
-    return (
-      <div className="text-[10px] uppercase tracking-widest text-zinc-500 px-2.5 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800">
-        No streak
-      </div>
-    );
-  }
+function StreakBadge({ streak, longestStreak = 0 }) {
+  const best = Math.max(longestStreak || 0, streak || 0);
+  const isRecord = streak > 0 && streak >= best;
   return (
-    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-      <span className="text-base leading-none">🔥</span>
-      <div className="leading-tight">
-        <div className="text-sm font-semibold text-emerald-300 tabular-nums">{streak}</div>
-        <div className="text-[8px] uppercase tracking-widest text-emerald-400/80 font-semibold -mt-0.5">
-          day streak
+    <div className="flex flex-col items-end gap-1">
+      {streak > 0 ? (
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+          <span className="text-base leading-none">🔥</span>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold text-emerald-300 tabular-nums">{streak}</div>
+            <div className="text-[8px] uppercase tracking-widest text-emerald-400/80 font-semibold -mt-0.5">
+              day streak
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="text-[10px] uppercase tracking-widest text-zinc-500 px-2.5 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800">
+          No streak
+        </div>
+      )}
+      {best > 0 && (
+        <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-zinc-500">
+          <span>🏆</span>
+          {isRecord ? (
+            <span className="text-amber-300 font-semibold">Best ever · {best}</span>
+          ) : (
+            <span>Best {best} — beat it</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
