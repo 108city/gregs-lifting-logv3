@@ -56,13 +56,13 @@ export default function ScheduleTab({ db, setDb }) {
       error: null,
     }));
     try {
-      // Fetch 4 weeks back + 2 weeks ahead so streak can walk through history.
-      // We only *display* today + future; the rest of the response feeds
-      // computeStreak so prior completions count properly.
+      // Fetch 4 weeks back (so streak can walk through history) and ~4 months
+      // ahead (so the whole active plan, and any future blocks, are returned —
+      // a 14-day window was clipping multi-week plans).
       const from = new Date();
       from.setUTCDate(from.getUTCDate() - 28);
       const to = new Date();
-      to.setUTCDate(to.getUTCDate() + 14);
+      to.setUTCDate(to.getUTCDate() + 120);
       const qs = new URLSearchParams({
         from: from.toISOString().slice(0, 10),
         to: to.toISOString().slice(0, 10),
