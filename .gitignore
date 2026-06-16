@@ -166,3 +166,5 @@ update_schedule_v4.mjs
 update_schedule_v5.mjs
 update_schedule_v6.mjs
 inspect_recent_log.mjs
+tick_gap_days.mjs
+prune_gap_locals.mjs

@@ -426,7 +426,8 @@ function StreakBadge({ streak, longestStreak = 0 }) {
   const best = Math.max(longestStreak || 0, streak || 0);
   const isRecord = streak > 0 && streak >= best;
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex items-stretch gap-2">
+      {/* Current streak block */}
       {streak > 0 ? (
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
           <span className="text-base leading-none">🔥</span>
@@ -438,18 +439,29 @@ function StreakBadge({ streak, longestStreak = 0 }) {
           </div>
         </div>
       ) : (
-        <div className="text-[10px] uppercase tracking-widest text-zinc-500 px-2.5 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800">
+        <div className="flex items-center px-2.5 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800 text-[10px] uppercase tracking-widest text-zinc-500">
           No streak
         </div>
       )}
+
+      {/* Best / record block — beside the streak */}
       {best > 0 && (
-        <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-zinc-500">
-          <span>🏆</span>
-          {isRecord ? (
-            <span className="text-amber-300 font-semibold">Best ever · {best}</span>
-          ) : (
-            <span>Best {best} — beat it</span>
-          )}
+        <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border ${
+          isRecord
+            ? "bg-amber-500/10 border-amber-500/40"
+            : "bg-zinc-900/60 border-zinc-800"
+        }`}>
+          <span className="text-base leading-none">🏆</span>
+          <div className="leading-tight">
+            <div className={`text-sm font-semibold tabular-nums ${isRecord ? "text-amber-300" : "text-zinc-300"}`}>
+              {best}
+            </div>
+            <div className={`text-[8px] uppercase tracking-widest font-semibold -mt-0.5 ${
+              isRecord ? "text-amber-400/80" : "text-zinc-500"
+            }`}>
+              {isRecord ? "best ever" : "best · beat it"}
+            </div>
+          </div>
         </div>
       )}
     </div>
