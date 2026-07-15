@@ -361,6 +361,7 @@ function ScheduleRow({ workout, todayIso, isTicked, tickedByBodyOS, onToggle }) 
   const type = inferType(workout);
   const dayLabel = formatDayLabel(date);
   const desc = describeWorkout(workout, type);
+  const detail = describeDetail(workout, type);
   const isMissed = workout.status === "missed" && !isTicked;
 
   return (
@@ -384,6 +385,11 @@ function ScheduleRow({ workout, todayIso, isTicked, tickedByBodyOS, onToggle }) 
             </span>
           )}
         </div>
+        {detail && (
+          <div className="text-[11px] text-zinc-500 leading-snug mt-0.5 pl-6 truncate">
+            {detail}
+          </div>
+        )}
       </div>
 
       {isMissed ? (
@@ -521,36 +527,56 @@ const TYPE_ICON = {
   hiit: "⚡",
   rest: "😌",
   walk: "🚶",
+  class: "🧘",
   other: "·",
 };
 
 function inferType(w) {
   const t = w?.plan?.type;
-  if (["lift", "run", "hiit", "rest", "walk"].includes(t)) return t;
+  if (["lift", "run", "hiit", "rest", "walk", "class"].includes(t)) return t;
   if (Array.isArray(w?.plan?.exercises) && w.plan.exercises.length > 0) return "lift";
   const n = (w?.name || "").toLowerCase();
   if (/run/.test(n)) return "run";
-  if (/hiit|class/.test(n)) return "hiit";
+  if (/pilates|yoga|vinyasa|flow|align|mobility/.test(n)) return "class";
+  if (/hiit|trib3/.test(n)) return "hiit";
   if (/walk/.test(n)) return "walk";
   if (/rest/.test(n)) return "rest";
   return "other";
 }
 
 function describeWorkout(w, type) {
+  // The plan's own name is the most informative label ("Long run 18 km",
+  // "Tempo run (2/6/2)", "Pilates Align") — prefer it, and only synthesise
+  // one when a name is missing.
+  if (w?.name) return w.name;
   if (type === "run") {
     const km = w?.plan?.distance_km;
-    return km ? `Run ${km} km` : (w?.name || "Run");
+    return km ? `Run ${km} km` : "Run";
   }
-  if (type === "rest") {
-    return w?.name || "Rest day";
+  if (type === "rest") return "Rest day";
+  if (type === "hiit") return "HIIT class";
+  if (type === "class") return "Class";
+  if (type === "lift") return "Weights";
+  return "Workout";
+}
+
+/** Secondary line: class time/location, HR cap, interval structure, notes. */
+function describeDetail(w, type) {
+  const p = w?.plan || {};
+  const bits = [];
+  if (type === "class") {
+    if (p.time) bits.push(p.time);
+    if (p.location) bits.push(p.location);
+    if (bits.length) return bits.join(" · ");
   }
-  if (type === "hiit") {
-    return w?.name || "HIIT class";
+  if (p.structure) return p.structure;
+  if (type === "run") {
+    if (p.hr_cap) bits.push(`HR <${p.hr_cap}`);
+    if (bits.length) return bits.join(" · ");
   }
-  if (type === "lift") {
-    return w?.name || "Weights";
-  }
-  return w?.name || "Workout";
+  // Fall back to whatever summary/notes the entry carries.
+  const s = w?.summary;
+  return s && s.trim() ? s.trim() : null;
 }
 
 function formatDayLabel(iso) {
