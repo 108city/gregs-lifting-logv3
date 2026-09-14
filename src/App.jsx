@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { loadFromCloud, saveToCloud } from "./syncService";
+import { loadFromCloud, saveToCloud, getCloudUpdatedAt } from "./syncService";
 import Tabs, { TabsList, TabsTrigger, TabsContent } from "./tabs/Tabs";
 import LogTab from "./tabs/LogTab";
 import ProgressTab from "./tabs/ProgressTab";
@@ -38,10 +38,26 @@ export default function App() {
   const [syncError, setSyncError] = useState("");
   const [syncId, setSyncId] = useState("gregs-device");
   const hasHydratedFromCloud = useRef(false);
+  // The cloud `updated_at` this app last loaded or wrote. If a focus-time
+  // check finds the cloud is newer, someone else (another device, a script)
+  // wrote in the meantime and we must adopt their copy — NOT push ours over it.
+  const cloudUpdatedAtRef = useRef(null);
+  // Set when we've just adopted cloud data, so the save effect doesn't
+  // immediately write that same data straight back.
+  const skipNextSaveRef = useRef(false);
 
   // App-level rest timer — survives tab switches, persisted across reloads,
   // notifies / sounds / vibrates when complete.
   const restTimer = useRestTimer();
+
+  const adoptCloud = (cloud) => {
+    let next = cloud.data;
+    const migrated = runMigrations(next);
+    if (migrated) next = migrated;
+    cloudUpdatedAtRef.current = cloud.updatedAt || null;
+    skipNextSaveRef.current = true;
+    setDb(next);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -50,16 +66,13 @@ export default function App() {
         const cloud = await loadFromCloud();
         if (!mounted) return;
 
-        let mergedDb = db;
         if (cloud?.data && Object.keys(cloud.data).length) {
-          mergedDb = cloud.data;
+          adoptCloud(cloud);
+        } else {
+          const migrated = runMigrations(db);
+          if (migrated) setDb(migrated);
         }
-
-        const migrated = runMigrations(mergedDb);
-        if (migrated) mergedDb = migrated;
-
         hasHydratedFromCloud.current = true;
-        setDb(mergedDb);
         setSyncStatus("success");
       } catch (e) {
         setSyncError(e.message);
@@ -68,16 +81,52 @@ export default function App() {
       }
     })();
     return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-hydrate when the app regains focus. Previously the cloud was read once
+  // on mount only, so a long-lived tab/PWA would clobber any write made
+  // elsewhere the next time the user changed anything. Cheap: one small read.
+  useEffect(() => {
+    let checking = false;
+    async function recheck() {
+      if (document.hidden || checking || !hasHydratedFromCloud.current) return;
+      checking = true;
+      try {
+        const stamp = await getCloudUpdatedAt(syncId);
+        if (stamp && stamp !== cloudUpdatedAtRef.current) {
+          const cloud = await loadFromCloud();
+          if (cloud?.data && Object.keys(cloud.data).length) adoptCloud(cloud);
+        }
+      } catch (e) {
+        console.warn("[sync] focus recheck failed", e?.message || e);
+      } finally {
+        checking = false;
+      }
+    }
+    document.addEventListener("visibilitychange", recheck);
+    window.addEventListener("focus", recheck);
+    return () => {
+      document.removeEventListener("visibilitychange", recheck);
+      window.removeEventListener("focus", recheck);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncId]);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(db)); } catch {}
 
     if (!hasHydratedFromCloud.current) return;
+    if (skipNextSaveRef.current) { skipNextSaveRef.current = false; return; }
 
     setSyncStatus("syncing");
     saveToCloud(db, syncId)
-      .then(() => { setSyncStatus("success"); setSyncError(""); })
+      .then(async () => {
+        setSyncStatus("success"); setSyncError("");
+        // Record the stamp our own write produced so the next focus check
+        // doesn't mistake it for a foreign write.
+        try { cloudUpdatedAtRef.current = await getCloudUpdatedAt(syncId); } catch {}
+      })
       .catch(e => { setSyncError(e.message); setSyncStatus("error"); });
   }, [db, syncId]);
 

@@ -50,6 +50,13 @@ export async function loadFromCloud() {
   }
 }
 
+// Cheap check of the cloud's last-modified stamp (used to detect writes
+// made elsewhere — another device, or a script — while this app was open).
+export async function getCloudUpdatedAt(rowId = "gregs-device") {
+  const snap = await getDoc(doc(db, COLLECTION, rowId));
+  return readUpdatedAt(snap);
+}
+
 // Save a full snapshot to the cloud
 export async function saveToCloud(dbSnapshot, rowId = "gregs-device") {
   console.log(`saveToCloud called with rowId: ${rowId}`);
