@@ -35,3 +35,19 @@ Idempotent — safe to re-run. InBody dedups on `external_id`.
 ```
 node scripts/backfill-inbody.mjs
 ```
+
+## Claude connector (MCP)
+
+`api/mcp` is a remote [MCP](https://modelcontextprotocol.io) server that lets Claude read and edit this app's data — programs and their day templates, the exercise database, the workout log and local schedule entries. The dated training plan stays in BodyOS; this server points Claude there for planning.
+
+Code lives in `mcp/`: `server.js` (tools), `model.js` (name resolution and record shapes), `store.js` (Firestore, writes in a transaction), `http.js` (auth + Streamable HTTP, stateless).
+
+**Setup**
+
+1. Set `LIFTING_MCP_KEY` (a long random secret) in Vercel → Environment Variables, then redeploy. Until it's set the endpoint returns 503.
+2. claude.ai / Claude mobile: Settings → Connectors → Add custom connector, URL `https://<your-domain>/api/mcp/<LIFTING_MCP_KEY>`.
+3. Claude Code: `claude mcp add --transport http lifting-log https://<your-domain>/api/mcp --header "Authorization: Bearer <LIFTING_MCP_KEY>"`.
+
+Treat the connector URL like a password — anyone with it can edit the data. To revoke, change the key in Vercel and redeploy.
+
+**Tools:** `get_overview`, `list_programs`, `get_program`, `list_exercises`, `list_workouts`, `exercise_history`, `list_schedule_entries`, `create_exercise`, `create_program`, `set_program_day`, `swap_exercise`, `update_program`, `set_active_program`, `log_workout` (mirrors to BodyOS), `delete_workout`, `set_schedule_entry`, `remove_schedule_entry`.
